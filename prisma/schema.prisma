@@ -1,0 +1,129 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PaymentType {
+  CREDITO
+  DEBITO
+  AMBOS
+
+  @@map("payment_type")
+}
+
+model Bank {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  promotions Promotion[]
+
+  @@map("banks")
+}
+
+model Category {
+  id   String @id @default(uuid())
+  name String @unique
+
+  merchantChains MerchantChain[]
+
+  @@map("categories")
+}
+
+model MerchantChain {
+  id         String @id @default(uuid())
+  name       String @unique
+  categoryId String @map("category_id")
+
+  category   Category    @relation(fields: [categoryId], references: [id])
+  branches   Branch[]
+  promotions Promotion[]
+
+  @@index([categoryId])
+  @@map("merchant_chains")
+}
+
+model Branch {
+  id              String  @id @default(uuid())
+  merchantChainId String  @map("merchant_chain_id")
+  name            String
+  address         String?
+  neighborhood    String?
+  format          String?
+  latitude        Float?
+  longitude       Float?
+
+  merchantChain     MerchantChain     @relation(fields: [merchantChainId], references: [id])
+  promotionBranches PromotionBranch[]
+  savingLogs        SavingLog[]
+  preferredByUsers  User[]            @relation("PreferredBranch")
+
+  @@unique([merchantChainId, name])
+  @@map("branches")
+}
+
+model Promotion {
+  id                   String      @id @default(uuid())
+  bankId               String      @map("bank_id")
+  merchantChainId      String      @map("merchant_chain_id")
+  discountPercentage   Decimal     @map("discount_percentage") @db.Decimal(5, 2)
+  paymentType          PaymentType @map("payment_type")
+  cardName             String?     @map("card_name")
+  capAmount            Decimal?    @map("cap_amount") @db.Decimal(10, 2)
+  validFrom            DateTime    @map("valid_from")
+  validUntil           DateTime    @map("valid_until")
+  sourceUrl            String      @map("source_url")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+  appliesToAllBranches Boolean     @default(true) @map("applies_to_all_branches")
+
+  bank              Bank              @relation(fields: [bankId], references: [id])
+  merchantChain     MerchantChain     @relation(fields: [merchantChainId], references: [id])
+  promotionBranches PromotionBranch[]
+
+  @@index([merchantChainId, validFrom, validUntil])
+  @@index([bankId])
+  @@map("promotions")
+}
+
+model PromotionBranch {
+  promotionId String @map("promotion_id")
+  branchId    String @map("branch_id")
+
+  promotion Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  branch    Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([promotionId, branchId])
+  @@map("promotion_branches")
+}
+
+model User {
+  id                String   @id @default(uuid())
+  whatsapp          String   @unique
+  preferredBranchId String?  @map("preferred_branch_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  preferredBranch Branch?     @relation("PreferredBranch", fields: [preferredBranchId], references: [id])
+  savingLogs      SavingLog[]
+
+  @@map("users")
+}
+
+model SavingLog {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  branchId        String   @map("branch_id")
+  amount          Decimal  @db.Decimal(10, 2)
+  estimatedSaving Decimal  @map("estimated_saving") @db.Decimal(10, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  user   User   @relation(fields: [userId], references: [id])
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("saving_logs")
+}

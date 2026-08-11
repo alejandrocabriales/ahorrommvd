@@ -1,0 +1,38 @@
+# compiled output
+/dist
+/node_modules
+
+# generated Prisma client (regenerated via `prisma generate`)
+/generated/prisma
+
+# logs
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# OS
+.DS_Store
+
+# tests
+/coverage
+/.nyc_output
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+*.launch
+.settings/
+
+# environment variables
+.env
+
+# local Claude Code permissions (machine-specific)
+.claude/settings.local.json
+
+# tsbuildinfo
+*.tsbuildinfo
