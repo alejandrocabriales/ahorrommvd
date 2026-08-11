@@ -127,11 +127,17 @@ export class SyncPromotionsUseCase {
       toPersist.push({ ...promo, merchantChainId: chain.id });
     }
 
-    await this.prisma.$transaction([
-      this.prisma.promotion.deleteMany({ where: { bankId: bank.id } }),
-      ...toPersist.map((promo) =>
-        this.prisma.promotion.create({
-          data: {
+    // createMany en vez de un create() por fila: con las ~130 promos reales
+    // que puede traer Santander, N creates individuales dentro de la misma
+    // transacción se pasaban del timeout default de Prisma (5s) apenas la
+    // latencia de red subía un poco (ej. corriendo el sync contra la DB por
+    // el proxy público en vez de la red interna de Railway). Una sola query
+    // de inserción es más rápida y no escala con la cantidad de filas.
+    await this.prisma.$transaction(
+      [
+        this.prisma.promotion.deleteMany({ where: { bankId: bank.id } }),
+        this.prisma.promotion.createMany({
+          data: toPersist.map((promo) => ({
             bankId: bank.id,
             merchantChainId: promo.merchantChainId,
             discountPercentage: promo.discountPercentage,
@@ -142,10 +148,11 @@ export class SyncPromotionsUseCase {
             validUntil: promo.validUntil,
             sourceUrl: promo.sourceUrl,
             appliesToAllBranches: true,
-          },
+          })),
         }),
-      ),
-    ]);
+      ],
+      { timeout: 20000 },
+    );
 
     this.logger.log(
       `${scraper.bankName}: ${scraped.length} scrapeadas, ${toPersist.length} guardadas ` +

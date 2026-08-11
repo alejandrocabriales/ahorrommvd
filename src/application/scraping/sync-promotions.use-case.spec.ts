@@ -65,7 +65,7 @@ function buildPrismaMock() {
     },
     promotion: {
       deleteMany: jest.fn(),
-      create: jest.fn(),
+      createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     $transaction: jest
       .fn()
