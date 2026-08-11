@@ -13,16 +13,16 @@ import { SantanderBenefitsScraper } from './santander/santander-benefits.scraper
     ItauBenefitsScraper,
     {
       provide: BANK_SCRAPERS,
-      // Itaú queda afuera de la lista activa a propósito: SyncPromotionsUseCase
-      // borra-y-recrea las promociones del banco en cada corrida, y un scraper
-      // que siempre devuelve [] (stub) terminaría borrando las promociones
-      // ilustrativas de Itaú del seed sin reemplazarlas por nada real. Sumarlo
-      // acá cuando itau-benefits.scraper.ts esté implementado de verdad.
       useFactory: (
         santander: SantanderBenefitsScraper,
         oca: OcaBenefitsScraper,
-      ) => [santander, oca],
-      inject: [SantanderBenefitsScraper, OcaBenefitsScraper],
+        itau: ItauBenefitsScraper,
+      ) => [santander, oca, itau],
+      inject: [
+        SantanderBenefitsScraper,
+        OcaBenefitsScraper,
+        ItauBenefitsScraper,
+      ],
     },
     SyncPromotionsUseCase,
     PromotionsSyncCron,
