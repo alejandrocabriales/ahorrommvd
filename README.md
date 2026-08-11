@@ -4,11 +4,12 @@ Copiloto de ahorro por WhatsApp para Montevideo. Ayuda a decidir con qué
 tarjeta pagar o si conviene esperar otro día, usando promociones bancarias
 reales (Itaú, Santander, OCA) en supermercados, farmacias y restaurantes.
 
-Este repo está en **Semana 2** del roadmap: además de la base (Semana 1),
-ya hay scrapers reales de Santander y OCA corriendo por cron diario. Itaú
-sigue sin implementar (bloqueado en investigación, ver `PLAN.md`). El motor
-de búsqueda/comparación (Semana 3) y WhatsApp + IA (Semana 4) todavía no
-están implementados.
+Este repo está en **Semana 4** del roadmap: base (Semana 1), scrapers
+reales de Santander y OCA por cron diario (Semana 2, Itaú sigue bloqueado),
+motor de búsqueda con pg_trgm y comparación hoy-vs-7-días (Semana 3), y
+ahora WhatsApp Cloud API + interpretación con IA (OpenRouter/GPT-4o) +
+registro opcional de gasto (Semana 4) — probado end-to-end contra un
+número de WhatsApp real. Solo falta el deploy a producción.
 
 Ver `PLAN.md` para el detalle completo del roadmap, decisiones y
 limitaciones conocidas de cada semana — es la fuente de verdad de dónde
@@ -83,6 +84,47 @@ El seed es idempotente para bancos/categorías/cadenas/sucursales (`upsert`).
 Las promociones se recrean en cada corrida (`prisma migrate reset` + `db:seed`
 para resetear todo desde cero).
 
+## Probar el motor de búsqueda (Semana 3)
+
+Con el seed de demo cargado y la app corriendo (`npm run start:dev`):
+
+```bash
+# Caso de éxito del spec: hoy Santander 20%, "pero mañana OCA 40%"
+curl "http://localhost:3900/search?q=Ta-Ta+Pocitos&amount=4000"
+
+# Tolerante a errores (pg_trgm) — misma sucursal
+curl "http://localhost:3900/search?q=tta+positos"
+
+# Cadena con varias sucursales, sin especificar cuál -> pregunta
+curl "http://localhost:3900/search?q=Ta-Ta"
+
+# Solo sucursales (sin promos, solo el fuzzy match)
+curl "http://localhost:3900/branches/search?q=punta+carreta"
+```
+
+## WhatsApp + IA (Semana 4)
+
+Requiere `OPENROUTER_API_KEY` (y opcionalmente `OPENROUTER_MODEL`, default
+`openai/gpt-4o`) y, para el webhook, `WHATSAPP_TOKEN` /
+`WHATSAPP_PHONE_NUMBER_ID` / `WHATSAPP_VERIFY_TOKEN` en `.env` — ver
+`PLAN.md` para la guía completa de setup en Meta for Developers (cuenta,
+app, número de test, ngrok para exponer el webhook en local).
+
+```bash
+# Prueba la interpretación de lenguaje natural contra OpenRouter/GPT-4o
+# directo, sin levantar toda la app ni necesitar WhatsApp configurado
+npm run ai:test
+
+# Simula un mensaje real de WhatsApp llegando al webhook (con la app corriendo)
+curl -X POST http://localhost:3900/whatsapp/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"entry":[{"changes":[{"value":{"messages":[{"from":"598...","type":"text","text":{"body":"Ta-Ta Pocitos"}}]}}]}]}'
+```
+
+`OPENROUTER_API_KEY`/`WHATSAPP_TOKEN` faltantes no rompen el boot de la
+app (fallan recién al procesar un mensaje) — así que `GET /search` y los
+scrapers siguen andando sin que esto esté configurado.
+
 ## Scripts
 
 | Script | Qué hace |
@@ -134,5 +176,5 @@ filtrar cadenas por categoría en `GET /search`.
 
 - [x] Semana 1 — proyecto, Docker, Postgres, Prisma, modelo de datos, seed
 - [~] Semana 2 — scrapers: Santander y OCA reales (cron diario + `scrape:run`), Itaú bloqueado (ver `PLAN.md`)
-- [ ] Semana 3 — motor de búsqueda, comparación hoy vs. 7 días, sucursales
-- [ ] Semana 4 — WhatsApp Cloud API, interpretación con IA, deploy
+- [x] Semana 3 — motor de búsqueda, comparación hoy vs. 7 días, sucursales (`GET /search`, `/branches/search`, `/promotions/upcoming`)
+- [~] Semana 4 — WhatsApp Cloud API + IA (OpenRouter/GPT-4o) + `/savings`: DONE. Deploy: pendiente

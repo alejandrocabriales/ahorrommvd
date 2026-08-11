@@ -32,4 +32,13 @@ export default tseslint.config(
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },
+  {
+    // `expect(mock.method).toHaveBeenCalledWith(...)` pasa una referencia
+    // de método suelta a propósito — es el patrón normal de Jest, no un
+    // riesgo real de `this` (los mocks no usan `this`).
+    files: ['**/*.spec.ts'],
+    rules: {
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
 );
