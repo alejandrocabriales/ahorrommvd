@@ -39,7 +39,11 @@ async function upsertBank(name: string) {
 }
 
 async function upsertCategory(name: string) {
-  return prisma.category.upsert({ where: { name }, update: {}, create: { name } });
+  return prisma.category.upsert({
+    where: { name },
+    update: {},
+    create: { name },
+  });
 }
 
 async function upsertChain(name: string, categoryId: string) {
@@ -215,21 +219,25 @@ async function main() {
   });
 
   // Ta-Ta Hiper Cerro: promo propia con débito, vigente toda la semana.
-  await prisma.promotion.create({
-    data: {
-      bankId: santander.id,
-      merchantChainId: tata.id,
-      discountPercentage: 15,
-      paymentType: PaymentType.DEBITO,
-      cardName: 'Santander Débito',
-      validFrom: startOfDay(today),
-      validUntil: endOfDay(addDays(today, 7)),
-      sourceUrl: sourceUrls.santander,
-      appliesToAllBranches: false,
-    },
-  }).then((promo) =>
-    prisma.promotionBranch.create({ data: { promotionId: promo.id, branchId: tataCerro.id } }),
-  );
+  await prisma.promotion
+    .create({
+      data: {
+        bankId: santander.id,
+        merchantChainId: tata.id,
+        discountPercentage: 15,
+        paymentType: PaymentType.DEBITO,
+        cardName: 'Santander Débito',
+        validFrom: startOfDay(today),
+        validUntil: endOfDay(addDays(today, 7)),
+        sourceUrl: sourceUrls.santander,
+        appliesToAllBranches: false,
+      },
+    })
+    .then((promo) =>
+      prisma.promotionBranch.create({
+        data: { promotionId: promo.id, branchId: tataCerro.id },
+      }),
+    );
 
   // Devoto: promo de cadena completa.
   await prisma.promotion.create({
@@ -277,7 +285,7 @@ async function main() {
   });
 
   // McDonald's: promo de fin de semana con OCA.
-  const nextFriday = addDays(today, ((5 - today.getDay() + 7) % 7) || 7);
+  const nextFriday = addDays(today, (5 - today.getDay() + 7) % 7 || 7);
   await prisma.promotion.create({
     data: {
       bankId: oca.id,

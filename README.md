@@ -4,10 +4,15 @@ Copiloto de ahorro por WhatsApp para Montevideo. Ayuda a decidir con qué
 tarjeta pagar o si conviene esperar otro día, usando promociones bancarias
 reales (Itaú, Santander, OCA) en supermercados, farmacias y restaurantes.
 
-Este repo está en **Semana 1** del roadmap: proyecto base, Docker, Postgres,
-modelo de datos y seed de desarrollo. Los scrapers (Semana 2), el motor de
-búsqueda/comparación (Semana 3) y WhatsApp + IA (Semana 4) todavía no están
-implementados.
+Este repo está en **Semana 2** del roadmap: además de la base (Semana 1),
+ya hay scrapers reales de Santander y OCA corriendo por cron diario. Itaú
+sigue sin implementar (bloqueado en investigación, ver `PLAN.md`). El motor
+de búsqueda/comparación (Semana 3) y WhatsApp + IA (Semana 4) todavía no
+están implementados.
+
+Ver `PLAN.md` para el detalle completo del roadmap, decisiones y
+limitaciones conocidas de cada semana — es la fuente de verdad de dónde
+quedamos.
 
 ## Stack
 
@@ -89,6 +94,7 @@ para resetear todo desde cero).
 | `npm run db:seed` | Corre `prisma/seed.ts` |
 | `npm run db:studio` | Abre Prisma Studio |
 | `npm run db:reset` | Resetea la base y vuelve a correr migraciones + seed |
+| `npm run scrape:run` | Corre el sync de promociones (Santander/OCA/Itaú) a mano, sin esperar al cron de las 3am. Pisa las promos de Santander/OCA con datos reales — corré `db:seed` después si querés volver al escenario de demo |
 | `npm test` / `npm run test:e2e` | Tests unitarios / e2e |
 
 ## Notas técnicas (por si algo no arranca)
@@ -108,6 +114,14 @@ para resetear todo desde cero).
   porque `rootDir` de TypeScript termina abarcando `src/`, `prisma/` y
   `generated/` (el cliente generado vive fuera de `src` y se importa desde
   ahí). `start:prod` y el `Dockerfile` ya apuntan al path correcto.
+- **No corras código con decoradores de Nest (`@Injectable`, DI) con
+  `tsx`.** Su transform basado en esbuild no emite bien
+  `design:paramtypes`, así que `Reflect.getMetadata` no encuentra el tipo
+  del parámetro y la inyección de dependencias falla en runtime con
+  `UndefinedDependencyException` (pasó armando `scrape:run`). `tsx` sí
+  sirve para scripts sin DI, como `prisma/seed.ts`. Para todo lo que
+  bootstrapea un `AppModule` (scripts sueltos, runners), compilá con
+  `nest build` y corré el `.js` de `dist/` — así lo hace `scrape:run`.
 
 ## Decisión fuera de la lista literal del spec
 
@@ -119,6 +133,6 @@ filtrar cadenas por categoría en `GET /search`.
 ## Roadmap
 
 - [x] Semana 1 — proyecto, Docker, Postgres, Prisma, modelo de datos, seed
-- [ ] Semana 2 — scrapers Itaú / Santander / OCA
+- [~] Semana 2 — scrapers: Santander y OCA reales (cron diario + `scrape:run`), Itaú bloqueado (ver `PLAN.md`)
 - [ ] Semana 3 — motor de búsqueda, comparación hoy vs. 7 días, sucursales
 - [ ] Semana 4 — WhatsApp Cloud API, interpretación con IA, deploy
