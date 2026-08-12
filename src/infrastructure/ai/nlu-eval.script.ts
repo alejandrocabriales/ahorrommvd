@@ -25,6 +25,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     wantsGeneralSavings: false,
     confirmsRecommendation: false,
     prefersToWait: false,
+    asksLocation: false,
     ...overrides,
   };
 }
@@ -128,6 +129,24 @@ const CASES: EvalCase[] = [
   {
     message: 'y mañana?',
     expected: intent({ prefersToWait: true }),
+  },
+  {
+    // Caso real reportado en producción: esto tiraba "no entendí" porque
+    // merchantName no se extraía en una pregunta de ubicación.
+    message: 'Chajá donde esta?',
+    expected: intent({ merchantName: 'Chajá', asksLocation: true }),
+  },
+  {
+    message: '¿dónde queda Ta-Ta?',
+    expected: intent({ merchantName: 'Ta-Ta', asksLocation: true }),
+  },
+  {
+    message: 'en qué dirección está Farmashop Pocitos',
+    expected: intent({
+      merchantName: 'Farmashop',
+      branchHint: 'Pocitos',
+      asksLocation: true,
+    }),
   },
   {
     message: 'mejor espero, no es urgente',

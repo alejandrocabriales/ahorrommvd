@@ -40,6 +40,7 @@ describe('buildRecommendationFromSearch', () => {
       merchantChainName: 'Ta-Ta',
       branchName: 'Ta-Ta Pocitos',
       neighborhood: null,
+      address: null,
       bankName: 'Santander',
       discountPercentage: 20,
       paymentType: PaymentType.CREDITO,
@@ -168,5 +169,39 @@ describe('buildRecommendationFromSearch', () => {
     );
     expect(rec.zone).toBe('Pocitos');
     expect(rec.bestToday?.neighborhood).toBeNull();
+  });
+
+  it('carries the resolved address/neighborhood through to bestToday and betterSoon ("¿dónde está?")', () => {
+    const rec = buildRecommendationFromSearch(
+      resolved({
+        today: PROMO,
+        better: { promotion: PROMO, daysFromNow: 1 },
+        neighborhood: 'Pocitos',
+        address: 'Av. Brasil 2846',
+      }),
+      null,
+    );
+
+    expect(rec.bestToday?.address).toBe('Av. Brasil 2846');
+    expect(rec.bestToday?.neighborhood).toBe('Pocitos');
+    expect(rec.betterSoon?.option.address).toBe('Av. Brasil 2846');
+  });
+
+  it('leaves address null (never invents one) when we never resolved a specific branch', () => {
+    const rec = buildRecommendationFromSearch(resolved({ today: PROMO }), null);
+    expect(rec.bestToday?.address).toBeNull();
+  });
+
+  it('threads asksLocation through, defaulting to false', () => {
+    const withoutFlag = buildRecommendationFromSearch(resolved({ today: PROMO }), null);
+    const withFlag = buildRecommendationFromSearch(
+      resolved({ today: PROMO }),
+      null,
+      null,
+      true,
+    );
+
+    expect(withoutFlag.asksLocation).toBe(false);
+    expect(withFlag.asksLocation).toBe(true);
   });
 });

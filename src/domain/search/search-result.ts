@@ -10,6 +10,7 @@ export interface MerchantMatch {
   branchId?: string;
   branchName?: string;
   neighborhood?: string;
+  address?: string;
   score: number;
 }
 

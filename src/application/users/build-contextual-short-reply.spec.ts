@@ -16,6 +16,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     wantsGeneralSavings: false,
     confirmsRecommendation: false,
     prefersToWait: false,
+    asksLocation: false,
     ...overrides,
   };
 }
@@ -39,6 +40,7 @@ const BEST_TODAY: Recommendation['bestToday'] = {
   merchantChainName: 'Farmashop',
   branchName: null,
   neighborhood: null,
+  address: null,
   bankName: 'Itaú',
   discountPercentage: 15,
   paymentType: PaymentType.CREDITO,
@@ -50,6 +52,7 @@ const BETTER_SOON: Recommendation['betterSoon'] = {
     merchantChainName: "McDonald's",
     branchName: null,
     neighborhood: null,
+    address: null,
     bankName: 'OCA',
     discountPercentage: 30,
     paymentType: PaymentType.CREDITO,
@@ -73,6 +76,7 @@ const BASE: Recommendation = {
   estimatedSavingToday: null,
   nothingFound: false,
   spentAmount: null,
+  asksLocation: false,
 };
 
 describe('buildContextualShortReply', () => {

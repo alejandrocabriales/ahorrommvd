@@ -184,6 +184,7 @@ export class HandleWhatsAppMessageUseCase {
       from,
       effectiveQuery,
       filterUserId,
+      intent.asksLocation,
     );
 
     await this.sender.sendTextMessage(
@@ -214,6 +215,7 @@ export class HandleWhatsAppMessageUseCase {
     from: string,
     query: PendingQuery,
     filterUserId: string | undefined,
+    asksLocation: boolean,
   ): Promise<ReplyResult> {
     if (query.merchantName) {
       const q = [query.merchantName, query.branchHint]
@@ -224,7 +226,13 @@ export class HandleWhatsAppMessageUseCase {
         userId: filterUserId,
         amount: query.amount ?? undefined,
       });
-      return this.formatSearchResponse(from, result, query.amount, query.zone);
+      return this.formatSearchResponse(
+        from,
+        result,
+        query.amount,
+        query.zone,
+        asksLocation,
+      );
     }
 
     if (query.categoryName) {
@@ -273,6 +281,7 @@ export class HandleWhatsAppMessageUseCase {
     result: SearchResponse,
     amount: number | null,
     zone: string | null,
+    asksLocation: boolean,
   ): Promise<ReplyResult> {
     if (result.status === 'not_found') {
       return { message: NOT_FOUND_MESSAGE, recommendation: null };
@@ -282,7 +291,7 @@ export class HandleWhatsAppMessageUseCase {
       const options = result.options
         .map(
           (o) =>
-            `- ${o.branchName}${o.neighborhood ? ` (${o.neighborhood})` : ''}`,
+            `- ${o.branchName}${o.neighborhood ? ` (${o.neighborhood})` : ''}${o.address ? ` — ${o.address}` : ''}`,
         )
         .join('\n');
       return {
@@ -295,6 +304,7 @@ export class HandleWhatsAppMessageUseCase {
       result,
       zone,
       amount ?? null,
+      asksLocation,
     );
     const built = await this.respondToRecommendation(recommendation);
     let message = built.message;

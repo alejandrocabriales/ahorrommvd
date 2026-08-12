@@ -139,6 +139,10 @@ export class BrowseByCategoryUseCase {
         : null,
       nothingFound: !comparison.today && !comparison.better,
       spentAmount: amount ?? null,
+      // Preguntar "dónde queda" solo tiene sentido para un comercio puntual
+      // (Response Generator necesita un "address" concreto) — a nivel
+      // categoría no hay un único lugar que señalar.
+      asksLocation: false,
     };
   }
 }

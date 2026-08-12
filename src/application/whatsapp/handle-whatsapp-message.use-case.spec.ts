@@ -33,6 +33,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     wantsGeneralSavings: false,
     confirmsRecommendation: false,
     prefersToWait: false,
+    asksLocation: false,
     ...overrides,
   };
 }
@@ -68,6 +69,7 @@ const DEFAULT_RECOMMENDATION: Recommendation = {
     merchantChainName: 'Farmashop',
     branchName: null,
     neighborhood: null,
+    address: null,
     bankName: 'Itaú',
     discountPercentage: 15,
     paymentType: PaymentType.CREDITO,
@@ -78,6 +80,7 @@ const DEFAULT_RECOMMENDATION: Recommendation = {
   estimatedSavingToday: null,
   nothingFound: false,
   spentAmount: null,
+  asksLocation: false,
 };
 
 const DEFAULT_AI_REPLY = 'La mejor opción es Farmashop con Itaú, 15%.';
@@ -266,6 +269,85 @@ describe('HandleWhatsAppMessageUseCase', () => {
       '598',
       '¿En cuál Ta-Ta?\n- Ta-Ta Pocitos (Pocitos)\n- Ta-Ta Cerro (Cerro)',
     );
+  });
+
+  it('includes the address in the disambiguation list when we have one loaded', async () => {
+    const { useCase, sender } = build(intent({ merchantName: 'Ta-Ta' }), {
+      status: 'disambiguate',
+      merchantChainName: 'Ta-Ta',
+      options: [
+        {
+          branchId: 'b1',
+          branchName: 'Ta-Ta Pocitos',
+          neighborhood: 'Pocitos',
+          address: 'Av. Brasil 2846',
+        },
+        {
+          branchId: 'b2',
+          branchName: 'Ta-Ta Cerro',
+          neighborhood: 'Cerro',
+          address: null,
+        },
+      ],
+    });
+
+    await useCase.execute('598', 'Ta-Ta');
+
+    expect(sender.sendTextMessage).toHaveBeenCalledWith(
+      '598',
+      '¿En cuál Ta-Ta?\n- Ta-Ta Pocitos (Pocitos) — Av. Brasil 2846\n- Ta-Ta Cerro (Cerro)',
+    );
+  });
+
+  describe('"¿dónde está?" (§ producción: "Chajá donde esta?")', () => {
+    it('threads asksLocation through to the Recommendation so the Response Generator can prioritize the address', async () => {
+      const { useCase, responseGenerator } = build(
+        intent({ merchantName: 'Chajá', asksLocation: true }),
+        {
+          status: 'resolved',
+          merchantChainName: 'Chajá',
+          branchName: 'Chajá Pocitos',
+          neighborhood: 'Pocitos',
+          address: 'Bulevar España 2411',
+          message: 'irrelevante',
+          today: TODAY_PROMO,
+          better: null,
+          upcoming: [TODAY_PROMO],
+        },
+      );
+
+      await useCase.execute('598', 'Chajá donde esta?');
+
+      expect(responseGenerator.generate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          asksLocation: true,
+          bestToday: expect.objectContaining({ address: 'Bulevar España 2411' }),
+        }),
+      );
+    });
+
+    it('leaves address null (honest gap, never invented) when we never loaded one for that branch', async () => {
+      const { useCase, responseGenerator } = build(
+        intent({ merchantName: 'Chajá', asksLocation: true }),
+        {
+          status: 'resolved',
+          merchantChainName: 'Chajá',
+          message: 'irrelevante',
+          today: TODAY_PROMO,
+          better: null,
+          upcoming: [TODAY_PROMO],
+        },
+      );
+
+      await useCase.execute('598', 'Chajá donde esta?');
+
+      expect(responseGenerator.generate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          asksLocation: true,
+          bestToday: expect.objectContaining({ address: null }),
+        }),
+      );
+    });
   });
 
   it('sends a not-found message when the engine could not resolve the merchant', async () => {
@@ -724,6 +806,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
             merchantChainName: "McDonald's",
             branchName: null,
             neighborhood: null,
+            address: null,
             bankName: 'OCA',
             discountPercentage: 30,
             paymentType: PaymentType.CREDITO,

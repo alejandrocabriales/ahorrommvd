@@ -6,11 +6,13 @@ export function toRecommendationOption(
   merchantChainName: string,
   branchName: string | null = null,
   neighborhood: string | null = null,
+  address: string | null = null,
 ): RecommendationOption {
   return {
     merchantChainName,
     branchName,
     neighborhood,
+    address,
     bankName: promotion.bankName,
     discountPercentage: promotion.discountPercentage,
     paymentType: promotion.paymentType,

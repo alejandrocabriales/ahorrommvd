@@ -16,6 +16,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     wantsGeneralSavings: false,
     confirmsRecommendation: false,
     prefersToWait: false,
+    asksLocation: false,
     ...overrides,
   };
 }
@@ -29,6 +30,7 @@ const FARMACIAS_RECOMMENDATION: Recommendation = {
     merchantChainName: 'Farmashop',
     branchName: null,
     neighborhood: null,
+    address: null,
     bankName: 'Itaú',
     discountPercentage: 15,
     paymentType: PaymentType.CREDITO,
@@ -39,6 +41,7 @@ const FARMACIAS_RECOMMENDATION: Recommendation = {
   estimatedSavingToday: null,
   nothingFound: false,
   spentAmount: null,
+  asksLocation: false,
 };
 
 function contextAt(

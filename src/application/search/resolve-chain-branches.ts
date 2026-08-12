@@ -31,6 +31,8 @@ export function resolveChainBranches(
       merchantChainName: chain.name,
       branchId: only.branchId,
       branchName: only.branchName,
+      neighborhood: only.neighborhood,
+      address: only.address,
     };
   }
 
@@ -44,6 +46,8 @@ export function resolveChainBranches(
       merchantChainName: chain.name,
       branchId: preferred.branchId,
       branchName: preferred.branchName,
+      neighborhood: preferred.neighborhood,
+      address: preferred.address,
     };
   }
 

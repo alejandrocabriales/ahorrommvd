@@ -15,11 +15,14 @@ export function buildRecommendationFromSearch(
   result: ResolvedSearchResponse,
   zone: string | null,
   amount: number | null = null,
+  asksLocation = false,
 ): Recommendation {
   const place = result.branchName ?? result.merchantChainName;
   const estimatedSavingBetterSoon = result.better
     ? computeEstimatedSaving(result.better.promotion, amount ?? undefined)
     : null;
+  const neighborhood = result.neighborhood ?? null;
+  const address = result.address ?? null;
 
   return {
     queryLabel: place,
@@ -29,6 +32,8 @@ export function buildRecommendationFromSearch(
           result.today,
           result.merchantChainName,
           result.branchName ?? null,
+          neighborhood,
+          address,
         )
       : null,
     alternatives: [],
@@ -38,6 +43,8 @@ export function buildRecommendationFromSearch(
             result.better.promotion,
             result.merchantChainName,
             result.branchName ?? null,
+            neighborhood,
+            address,
           ),
           daysFromNow: result.better.daysFromNow,
           estimatedSaving: estimatedSavingBetterSoon
@@ -56,5 +63,6 @@ export function buildRecommendationFromSearch(
       : null,
     nothingFound: !result.today && !result.better,
     spentAmount: amount,
+    asksLocation,
   };
 }

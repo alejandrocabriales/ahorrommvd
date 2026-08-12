@@ -2,6 +2,7 @@ export interface BranchOption {
   branchId: string;
   branchName: string;
   neighborhood: string | null;
+  address: string | null;
 }
 
 export type MerchantResolution =
@@ -11,6 +12,8 @@ export type MerchantResolution =
       merchantChainName: string;
       branchId?: string;
       branchName?: string;
+      neighborhood?: string | null;
+      address?: string | null;
     }
   | {
       status: 'disambiguate';

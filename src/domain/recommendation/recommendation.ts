@@ -10,6 +10,8 @@ export interface RecommendationOption {
   merchantChainName: string;
   branchName: string | null;
   neighborhood: string | null;
+  /** Dirección real de la sucursal, si la tenemos cargada — para responder "¿dónde está?" sin inventar. */
+  address: string | null;
   bankName: string;
   discountPercentage: number;
   paymentType: PaymentType;
@@ -46,4 +48,6 @@ export interface Recommendation {
   nothingFound: boolean;
   /** Monto que dijo el usuario que piensa gastar, si lo dijo — junto con estimatedSavingToday le permite al Response Generator decir cuánto terminaría pagando, no solo cuánto ahorra. */
   spentAmount: number | null;
+  /** true si el usuario preguntó explícitamente dónde queda el comercio — le dice al Response Generator que priorice `bestToday.address` en vez de repetir el descuento, o que sea honesto si no tenemos esa dirección cargada. */
+  asksLocation: boolean;
 }

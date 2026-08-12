@@ -25,6 +25,7 @@ interface BranchRow {
   branchId: string;
   branchName: string;
   neighborhood: string | null;
+  address: string | null;
   score: number;
 }
 
@@ -64,6 +65,7 @@ export class MerchantSearchService {
         branchId: b.branchId,
         branchName: b.branchName,
         neighborhood: b.neighborhood ?? undefined,
+        address: b.address ?? undefined,
         score: b.score,
       })),
       ...chains.map((c) => ({
@@ -90,6 +92,7 @@ export class MerchantSearchService {
       branchId: b.branchId,
       branchName: b.branchName,
       neighborhood: b.neighborhood ?? undefined,
+      address: b.address ?? undefined,
       score: b.score,
     }));
   }
@@ -118,6 +121,7 @@ export class MerchantSearchService {
         b.id AS "branchId",
         b.name AS "branchName",
         b.neighborhood AS "neighborhood",
+        b.address AS "address",
         GREATEST(
           similarity(b.name, ${query}),
           similarity(coalesce(b.neighborhood, ''), ${query})

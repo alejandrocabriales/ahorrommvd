@@ -19,6 +19,8 @@ export type SearchResponse =
       merchantChainName: string;
       branchId?: string;
       branchName?: string;
+      neighborhood?: string | null;
+      address?: string | null;
       estimatedSaving?: EstimatedSaving | null;
       message: string;
     } & PromotionComparison);

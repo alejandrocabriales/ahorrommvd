@@ -68,6 +68,8 @@ export class SearchUseCase {
       merchantChainName: resolution.merchantChainName,
       branchId: resolution.branchId,
       branchName: resolution.branchName,
+      neighborhood: resolution.neighborhood,
+      address: resolution.address,
       estimatedSaving,
       message,
       ...comparison,

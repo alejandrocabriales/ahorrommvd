@@ -29,4 +29,6 @@ export interface ParsedIntent {
   confirmsRecommendation: boolean;
   /** true si el mensaje dice que prefiere esperar a una mejora futura ya mencionada en la charla, sin agregar comercio/categoría propios (ej. "mañana entonces", "mejor espero", "capaz la semana que viene"). Solo tiene efecto si hay contexto reciente con una mejora futura. */
   prefersToWait: boolean;
+  /** true si el usuario pregunta explícitamente dónde queda/está un comercio (ej. "Chajá donde esta?", "¿dónde queda Ta-Ta?", "en qué dirección está"). merchantName igual debe extraerse si lo nombra — esto es una pregunta ADEMÁS del comercio, no en vez de. */
+  asksLocation: boolean;
 }

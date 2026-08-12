@@ -5,11 +5,13 @@ const POCITOS = {
   branchId: 'b-pocitos',
   branchName: 'Ta-Ta Pocitos',
   neighborhood: 'Pocitos',
+  address: 'Av. Brasil 2846',
 };
 const CERRO = {
   branchId: 'b-cerro',
   branchName: 'Ta-Ta Hiper Cerro',
   neighborhood: 'Cerro',
+  address: 'Grecia 3856',
 };
 
 describe('resolveChainBranches', () => {
@@ -32,13 +34,19 @@ describe('resolveChainBranches', () => {
       merchantChainName: 'Ta-Ta',
       branchId: 'b-pocitos',
       branchName: 'Ta-Ta Pocitos',
+      neighborhood: 'Pocitos',
+      address: 'Av. Brasil 2846',
     });
   });
 
   it('uses the user preferred branch when there are multiple branches', () => {
     const result = resolveChainBranches(CHAIN, [POCITOS, CERRO], 'b-cerro');
 
-    expect(result).toMatchObject({ status: 'resolved', branchId: 'b-cerro' });
+    expect(result).toMatchObject({
+      status: 'resolved',
+      branchId: 'b-cerro',
+      address: 'Grecia 3856',
+    });
   });
 
   it('asks which branch when there are multiple and no preference matches', () => {

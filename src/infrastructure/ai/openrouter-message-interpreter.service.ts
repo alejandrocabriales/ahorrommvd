@@ -14,7 +14,7 @@ const SYSTEM_PROMPT = `Extraés la intención de un mensaje de WhatsApp de un us
 
 Reglas:
 - Nunca inventes un comercio, sucursal, monto o banco que el usuario no haya escrito. Si algo no está en el mensaje, ese campo va null.
-- merchantName: nombre de cadena/comercio tal cual lo escribió el usuario, con errores de tipeo incluidos (ej. "tata", "farmashop"). null si no menciona ninguno.
+- merchantName: nombre de cadena/comercio tal cual lo escribió el usuario, con errores de tipeo incluidos (ej. "tata", "farmashop"). null si no menciona ninguno. Extraelo SIEMPRE que nombre un comercio, incluso si el mensaje es una pregunta de ubicación (ej. "Chajá donde esta?" -> merchantName: "Chajá") — no lo dejes null solo porque la pregunta es sobre dirección en vez de sobre precio.
 - branchHint: sucursal o barrio puntual mencionado junto al comercio (ej. "Ta-Ta Pocitos" -> "Pocitos"). null si no aplica.
 - categoryName: SOLO si el usuario no nombra un comercio puntual, uno de "${MVP_CATEGORY_NAMES.join('", "')}". Ej. "voy al súper" -> Supermercados, "necesito una farmacia" -> Farmacias, "quiero comer algo" -> Restaurantes. null si no aplica o si ya hay merchantName.
 - zone: barrio de Montevideo mencionado sin comercio específico (ej. "voy a Punta Carretas"). null si no aplica.
@@ -24,7 +24,8 @@ Reglas:
 - wantsGeneralSavings: true si el usuario pide ahorrar o la mejor opción en general SIN nombrar comercio ni categoría (ej. "quiero ahorrar hoy", "qué me conviene hacer", "qué descuento hay hoy", "dame la mejor oferta"). false si ya hay merchantName o categoryName, o si el mensaje no tiene que ver con ahorrar.
 - confirmsRecommendation: true SOLO si el mensaje es una aceptación corta de algo que ya se venía hablando, sin nombrar comercio/categoría propios (ej. "me sirve", "dale", "voy ahora", "listo", "genial, gracias", "ya voy para allá"). false en cualquier otro caso, incluso si el mensaje es positivo pero trae su propio comercio o categoría.
 - prefersToWait: true SOLO si el mensaje dice que prefiere esperar a algo mejor que ya se venía hablando, O pregunta explícitamente por esa mejora futura, sin nombrar comercio/categoría propios (ej. "mañana entonces", "mejor espero", "capaz la semana que viene", "no es urgente, espero", "y mañana?", "¿y el jueves?"). false en cualquier otro caso.
-- confirmsRecommendation y prefersToWait nunca son true al mismo tiempo, y nunca son true si el mensaje también trae merchantName, categoryName o wantsGeneralSavings.`;
+- confirmsRecommendation y prefersToWait nunca son true al mismo tiempo, y nunca son true si el mensaje también trae merchantName, categoryName o wantsGeneralSavings.
+- asksLocation: true si el usuario pregunta explícitamente dónde queda o está un comercio (ej. "Chajá donde esta?", "¿dónde queda Ta-Ta?", "en qué dirección está Farmashop", "cómo llego a San Roque"). A diferencia de confirmsRecommendation/prefersToWait, ESTE campo SÍ puede ir junto con merchantName — de hecho normalmente lo hace, porque preguntan la ubicación DE un comercio puntual. false en cualquier otro caso.`;
 
 const INTENT_JSON_SCHEMA = {
   name: 'parsed_intent',
@@ -48,6 +49,7 @@ const INTENT_JSON_SCHEMA = {
       wantsGeneralSavings: { type: 'boolean' },
       confirmsRecommendation: { type: 'boolean' },
       prefersToWait: { type: 'boolean' },
+      asksLocation: { type: 'boolean' },
     },
     required: [
       'merchantName',
@@ -60,6 +62,7 @@ const INTENT_JSON_SCHEMA = {
       'wantsGeneralSavings',
       'confirmsRecommendation',
       'prefersToWait',
+      'asksLocation',
     ],
     additionalProperties: false,
   },

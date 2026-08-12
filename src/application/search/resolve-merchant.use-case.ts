@@ -54,6 +54,8 @@ export class ResolveMerchantUseCase {
       merchantChainName: branch.merchantChain.name,
       branchId: branch.id,
       branchName: branch.name,
+      neighborhood: branch.neighborhood,
+      address: branch.address,
     };
   }
 
@@ -69,7 +71,7 @@ export class ResolveMerchantUseCase {
     const [branches, preferredBranchId] = await Promise.all([
       this.prisma.branch.findMany({
         where: { merchantChainId },
-        select: { id: true, name: true, neighborhood: true },
+        select: { id: true, name: true, neighborhood: true, address: true },
       }),
       this.getPreferredBranchId(userId),
     ]);
@@ -80,6 +82,7 @@ export class ResolveMerchantUseCase {
         branchId: b.id,
         branchName: b.name,
         neighborhood: b.neighborhood,
+        address: b.address,
       })),
       preferredBranchId,
     );
@@ -102,6 +105,8 @@ export class ResolveMerchantUseCase {
         merchantChainName: best.merchantChainName,
         branchId: best.branchId,
         branchName: best.branchName,
+        neighborhood: best.neighborhood ?? null,
+        address: best.address ?? null,
       };
     }
 
