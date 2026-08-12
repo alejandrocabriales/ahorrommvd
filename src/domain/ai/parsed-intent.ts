@@ -31,4 +31,12 @@ export interface ParsedIntent {
   prefersToWait: boolean;
   /** true si el usuario pregunta explícitamente dónde queda/está un comercio (ej. "Chajá donde esta?", "¿dónde queda Ta-Ta?", "en qué dirección está"). merchantName igual debe extraerse si lo nombra — esto es una pregunta ADEMÁS del comercio, no en vez de. */
   asksLocation: boolean;
+  /**
+   * true si el usuario pide un TIPO de comercio puntual que no es ninguna de
+   * las 3 categorías del MVP (ej. "verdulerías", "ferretería", "ropa") — a
+   * diferencia de wantsGeneralSavings (que es "sin nombrar categoría"), acá
+   * SÍ nombró una, solo que no la tenemos. false en cualquier otro caso,
+   * incluso si ya hay merchantName o categoryName.
+   */
+  unsupportedCategory: boolean;
 }

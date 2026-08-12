@@ -3,6 +3,11 @@
 Fuente de verdad de dónde estamos. Leer esto primero en cada sesión nueva
 antes de tocar código.
 
+**Visión de producto (plan aprobado, implementación en curso)**: ver
+`VISION.md` — "Copiloto de ahorro localizado para Montevideo", con la nota
+de continuidad al final de ese archivo marcando qué está hecho y qué falta
+de esa visión específicamente.
+
 ## Producto (resumen)
 
 Copiloto de ahorro por WhatsApp para Montevideo. No es app de finanzas
@@ -504,6 +509,62 @@ cadena completa).
 Detalle completo, con "qué debe estudiar el desarrollador" para cada
 concepto de IA nuevo (salida estructurada, memoria fuera del contexto del
 modelo, cuándo NO usar IA, `temperature` por tarea), en `responses.md`.
+
+**Personalidad/voseo sin caricatura** (mismo día, siguiendo `VISION.md`
+§10): `SYSTEM_PROMPT` del Response Generator ahora tiene reglas explícitas
+de voseo, modismos prohibidos ("bo", "che", "guita"...), la instrucción de
+no sonar argentino, y frases formales prohibidas con alternativas
+concretas. **Validado en vivo** con 4 mensajes reales contra el modelo
+(farmacias, restaurantes, supermercados, Ta-Ta con tope) — tono natural,
+sin caricatura, cierra con una sola pregunta cada vez. Detalle en
+`responses.md` #5.
+
+**Topes y comparación $ hoy-vs-mañana** (mismo día, `VISION.md` §6/§13):
+la prueba en vivo de la personalidad encontró un bug real — con un tope
+de $800 sobre un 40%, el modelo redactaba "ahorrás $800" sin explicar de
+dónde salía ese número (matemáticamente confuso, $1.600 sería lo
+esperable sin más contexto). Se agregó `BetterSoon.estimatedSaving`
+(mismo cálculo que `estimatedSavingToday`, con tope, ahora también para
+la opción de "conviene esperar" — antes solo existía para hoy) y una
+regla explícita de "Topes" en el prompt. **Validado en vivo, 2 casos**:
+el del tope confuso ahora explica "en teoría $1.600, tu ahorro real es
+$800"; un segundo caso más sutil (hoy sin tope = $800, mañana con tope =
+$800 también) el modelo notó SOLO que esperar no mejora nada en pesos
+aunque el % suba — la regla se está usando para razonar, no solo
+repitiendo un texto fijo. `"y mañana?"` se plegó dentro de
+`prefersToWait` (mismo template ya contesta la pregunta y empuja la
+decisión) en vez de agregar un campo nuevo. Detalle completo en
+`responses.md` #6 ("Aritmética fuera del modelo").
+
+**Bug real de producción — "Chajá donde esta?" y mención de zona ignorada
+(12/08/2026)**: usuario real reportó dos problemas en una conversación de
+WhatsApp real. (1) Preguntar por la ubicación de un comercio nombrado en
+la respuesta anterior ("Chajá donde esta?") tiraba "no entendí" — el
+Intent Parser no tenía ningún ejemplo con esa forma gramatical (pregunta
+de ubicación en vez de pedido de compra) y devolvía todo en null, aunque
+la regla de `merchantName` "en teoría" ya debía cubrirlo. Se agregó un
+ejemplo explícito + el campo `asksLocation`, y se threadeó
+`Branch.address` (existía en la base para 4 cadenas del seed pero nunca
+llegaba al Response Generator, ni para responder "¿dónde está?") a través
+de toda la cadena: `resolveMerchant` → `SearchResponse` →
+`buildRecommendationFromSearch` → `RecommendationOption.address`. (2) La
+mención del barrio en `"y en Pocitos?"` era "opcional" en el prompt
+("podés mencionar") — probado en vivo, el modelo la omitía casi siempre,
+sintiéndose como si hubiera ignorado la pregunta. Ahora es obligatoria.
+
+**Nueva infraestructura de testing**: `response-eval.script.ts` (`npm run
+ai:test:response`) — mismo espíritu que el eval de NLU pero para
+redacción: corre casos reales contra el Response Generator y chequea
+propiedades del texto (menciona la zona, explica el tope, da la dirección
+real o es honesto si no la tiene, sin modismos/frases de robot). Nace
+justo de estos 2 bugs — antes no había forma automática de detectar una
+regresión de prompt sin comparar respuestas a mano.
+
+**Validado en vivo end-to-end** (motor completo, no solo el redactor):
+"Ta-Ta Pocitos" → "Ta-Ta Pocitos donde esta?" ahora responde con la
+dirección real del seed ("Av. Brasil 2846"). `npm run ai:test`: 28/29
+(97%). `npm run ai:test:response`: 20/21 (95%). Detalle completo,
+formato de 7 puntos, en `responses.md` #7.
 
 ## Criterio de éxito del MVP
 

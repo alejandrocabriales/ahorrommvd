@@ -17,6 +17,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     confirmsRecommendation: false,
     prefersToWait: false,
     asksLocation: false,
+    unsupportedCategory: false,
     ...overrides,
   };
 }
