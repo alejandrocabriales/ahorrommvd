@@ -4,7 +4,7 @@ import { BrowseByCategoryUseCase } from './browse-by-category.use-case';
 
 interface FakePromoRow {
   merchantChainId: string;
-  merchantChain: { name: string };
+  merchantChain: { name: string; _count: { branches: number } };
   bank: { name: string };
   discountPercentage: number;
   paymentType: PaymentType;
@@ -16,12 +16,15 @@ interface FakePromoRow {
 }
 
 function row(
-  overrides: Partial<FakePromoRow> & {
+  overrides: Partial<Omit<FakePromoRow, 'merchantChain'>> & {
     merchantChainId: string;
     merchantChainName: string;
+    /** default true — la mayoría de los tests no le importa el filtro de Montevideo. */
+    hasVerifiedBranch?: boolean;
   },
 ): FakePromoRow {
   const today = new Date();
+  const { merchantChainName, hasVerifiedBranch, ...rest } = overrides;
   return {
     bank: { name: 'Itaú' },
     discountPercentage: 10,
@@ -31,8 +34,11 @@ function row(
     validFrom: startOfDay(today),
     validUntil: endOfDay(today),
     sourceUrl: 'https://example.com',
-    ...overrides,
-    merchantChain: { name: overrides.merchantChainName },
+    ...rest,
+    merchantChain: {
+      name: merchantChainName,
+      _count: { branches: hasVerifiedBranch === false ? 0 : 1 },
+    },
   };
 }
 
@@ -270,6 +276,46 @@ describe('BrowseByCategoryUseCase', () => {
 
     expect(rec.estimatedSavingToday).toBeNull();
     expect(rec.spentAmount).toBeNull();
+  });
+
+  it('prefers a chain with a verified Montevideo branch over a higher % chain with none (Soho bug: out-of-town merchant beating a real local one)', async () => {
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Soho',
+        discountPercentage: 25,
+        hasVerifiedBranch: false,
+      }),
+      row({
+        merchantChainId: 'c2',
+        merchantChainName: 'La Pasiva Arocena',
+        discountPercentage: 25,
+        hasVerifiedBranch: true,
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(prisma as never);
+
+    const rec = await useCase.execute('Restaurantes', 'Barrio Sur', undefined);
+
+    expect(rec.bestToday?.merchantChainName).toBe('La Pasiva Arocena');
+    expect(rec.alternatives).toEqual([]);
+  });
+
+  it('falls back to unverified candidates when nothing in the category has a verified branch yet (never show "nothing found" when there are real promos)', async () => {
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Bardo',
+        discountPercentage: 15,
+        hasVerifiedBranch: false,
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(prisma as never);
+
+    const rec = await useCase.execute('Restaurantes', null, undefined);
+
+    expect(rec.bestToday?.merchantChainName).toBe('Bardo');
+    expect(rec.nothingFound).toBe(false);
   });
 
   it('passes the query label and zone through untouched (zone is informational, never a proximity filter)', async () => {
