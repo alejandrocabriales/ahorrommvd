@@ -16,16 +16,17 @@ Reglas:
 - Nunca inventes un comercio, sucursal, monto o banco que el usuario no haya escrito. Si algo no está en el mensaje, ese campo va null.
 - merchantName: nombre de cadena/comercio tal cual lo escribió el usuario, con errores de tipeo incluidos (ej. "tata", "farmashop"). null si no menciona ninguno. Extraelo SIEMPRE que nombre un comercio, incluso si el mensaje es una pregunta de ubicación (ej. "Chajá donde esta?" -> merchantName: "Chajá") — no lo dejes null solo porque la pregunta es sobre dirección en vez de sobre precio.
 - branchHint: sucursal o barrio puntual mencionado junto al comercio (ej. "Ta-Ta Pocitos" -> "Pocitos"). null si no aplica.
-- categoryName: SOLO si el usuario no nombra un comercio puntual, uno de "${MVP_CATEGORY_NAMES.join('", "')}". Ej. "voy al súper" -> Supermercados, "necesito una farmacia" -> Farmacias, "quiero comer algo" -> Restaurantes. null si no aplica o si ya hay merchantName.
+- categoryName: SOLO si el usuario no nombra un comercio puntual, uno de "${MVP_CATEGORY_NAMES.join('", "')}". Ej. "voy al súper" -> Supermercados, "necesito una farmacia" -> Farmacias, "quiero comer algo" -> Restaurantes. null si no aplica o si ya hay merchantName. Si el usuario pide un tipo de comercio que NO es ninguna de esas 3 (ej. "verdulería", "ferretería", "ropa", "peluquería"), categoryName va null Y ADEMÁS marcá unsupportedCategory (ver abajo) — nunca lo fuerces a la categoría más parecida.
 - zone: barrio de Montevideo mencionado sin comercio específico (ej. "voy a Punta Carretas"). null si no aplica.
 - amount: monto en pesos uruguayos si el usuario dice cuánto gastó o va a gastar (ej. "Ta-Ta 4000" -> 4000). null si no menciona monto.
 - banks: lista de bancos con los que el usuario dice tener tarjeta, SOLO de "${MVP_BANK_NAMES.join('", "')}" (ej. "tengo Itaú y Santander" -> ["Itaú","Santander"], "mi tarjeta es OCA" -> ["OCA"]). Si menciona un banco que no es ninguno de esos tres, ignoralo. null si no menciona ningún banco en este mensaje.
 - showAllBanks: true SOLO si el usuario pide explícitamente ver ofertas de todos los bancos, no solo los suyos (ej. "dame todas las ofertas", "mostrame todo", "todas las promos", "de todos los bancos"). false en cualquier otro caso, incluso si no lo menciona.
-- wantsGeneralSavings: true si el usuario pide ahorrar o la mejor opción en general SIN nombrar comercio ni categoría (ej. "quiero ahorrar hoy", "qué me conviene hacer", "qué descuento hay hoy", "dame la mejor oferta"). false si ya hay merchantName o categoryName, o si el mensaje no tiene que ver con ahorrar.
+- wantsGeneralSavings: true si el usuario pide ahorrar o la mejor opción en general SIN nombrar comercio ni categoría de NINGÚN tipo (ej. "quiero ahorrar hoy", "qué me conviene hacer", "qué descuento hay hoy", "dame la mejor oferta"). false si ya hay merchantName o categoryName, si el mensaje no tiene que ver con ahorrar, o si nombra un tipo de comercio puntual aunque no sea una de las 3 categorías del MVP (eso es unsupportedCategory, no esto — "necesito descuentos en verdulerías" NO es wantsGeneralSavings, aunque diga "descuentos").
 - confirmsRecommendation: true SOLO si el mensaje es una aceptación corta de algo que ya se venía hablando, sin nombrar comercio/categoría propios (ej. "me sirve", "dale", "voy ahora", "listo", "genial, gracias", "ya voy para allá"). false en cualquier otro caso, incluso si el mensaje es positivo pero trae su propio comercio o categoría.
 - prefersToWait: true SOLO si el mensaje dice que prefiere esperar a algo mejor que ya se venía hablando, O pregunta explícitamente por esa mejora futura, sin nombrar comercio/categoría propios (ej. "mañana entonces", "mejor espero", "capaz la semana que viene", "no es urgente, espero", "y mañana?", "¿y el jueves?"). false en cualquier otro caso.
 - confirmsRecommendation y prefersToWait nunca son true al mismo tiempo, y nunca son true si el mensaje también trae merchantName, categoryName o wantsGeneralSavings.
-- asksLocation: true si el usuario pregunta explícitamente dónde queda o está un comercio (ej. "Chajá donde esta?", "¿dónde queda Ta-Ta?", "en qué dirección está Farmashop", "cómo llego a San Roque"). A diferencia de confirmsRecommendation/prefersToWait, ESTE campo SÍ puede ir junto con merchantName — de hecho normalmente lo hace, porque preguntan la ubicación DE un comercio puntual. false en cualquier otro caso.`;
+- asksLocation: true si el usuario pregunta explícitamente dónde queda o está un comercio (ej. "Chajá donde esta?", "¿dónde queda Ta-Ta?", "en qué dirección está Farmashop", "cómo llego a San Roque"). A diferencia de confirmsRecommendation/prefersToWait, ESTE campo SÍ puede ir junto con merchantName — de hecho normalmente lo hace, porque preguntan la ubicación DE un comercio puntual. false en cualquier otro caso.
+- unsupportedCategory: true si el usuario pide un TIPO de comercio (no un nombre puntual) que no es Supermercados, Farmacias ni Restaurantes — ej. "verdulerías", "necesito una ferretería", "dónde comprar ropa barata", "una peluquería". false si nombra un comercio puntual (merchantName), si la categoría SÍ es una de las 3, o si no pidió ningún tipo de comercio.`;
 
 const INTENT_JSON_SCHEMA = {
   name: 'parsed_intent',
@@ -50,6 +51,7 @@ const INTENT_JSON_SCHEMA = {
       confirmsRecommendation: { type: 'boolean' },
       prefersToWait: { type: 'boolean' },
       asksLocation: { type: 'boolean' },
+      unsupportedCategory: { type: 'boolean' },
     },
     required: [
       'merchantName',
@@ -63,6 +65,7 @@ const INTENT_JSON_SCHEMA = {
       'confirmsRecommendation',
       'prefersToWait',
       'asksLocation',
+      'unsupportedCategory',
     ],
     additionalProperties: false,
   },

@@ -26,6 +26,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     confirmsRecommendation: false,
     prefersToWait: false,
     asksLocation: false,
+    unsupportedCategory: false,
     ...overrides,
   };
 }
@@ -100,6 +101,17 @@ const CASES: EvalCase[] = [
   {
     message: 'qué me conviene hacer',
     expected: intent({ wantsGeneralSavings: true }),
+  },
+  {
+    // Bug real en vivo: esto se estaba interpretando como wantsGeneralSavings
+    // y terminaba mezclando Restaurantes + Farmacias en la respuesta, como
+    // si el usuario hubiese pedido "lo mejor de todo Montevideo".
+    message: 'necesito buscar descuentos en verdulerías',
+    expected: intent({ unsupportedCategory: true }),
+  },
+  {
+    message: 'dónde hay una ferretería con descuento',
+    expected: intent({ unsupportedCategory: true }),
   },
   {
     message: 'tengo que hacer el súper',

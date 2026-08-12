@@ -28,6 +28,10 @@ const NOT_FOUND_MESSAGE =
 const ASK_BANKS_MESSAGE =
   '¿Qué tarjetas tenés? Contame (ej. "tengo Itaú y Santander") o escribí ' +
   '"dame todas" para ver todas las ofertas sin filtrar.';
+const UNSUPPORTED_CATEGORY_MESSAGE =
+  'Por ahora solo tengo cargados descuentos de Supermercados, Farmacias y ' +
+  'Restaurantes. Para pedir otra categoría, entrá acá y escribinos a ' +
+  'soporte: https://ahorromvd-landing.netlify.app/';
 
 interface ReplyResult {
   message: string;
@@ -94,6 +98,23 @@ export class HandleWhatsAppMessageUseCase {
     const user = await this.resolveUser.execute(from);
     const hasKnownBanks = (user?.bankNames.length ?? 0) > 0;
     const context = user?.conversationContext ?? null;
+
+    // Pidió un tipo de comercio que no es ninguna de las 3 categorías del
+    // MVP (ej. "verdulerías") — cortamos acá, ANTES de mergear con contexto
+    // o preguntar bancos: si no, wantsGeneralSavings/browseByCategory(null)
+    // termina mezclando las 3 categorías reales como si el usuario las
+    // hubiese pedido (bug encontrado en vivo). No hay Recommendation que
+    // guardar, así que tampoco tocamos conversationContext.
+    if (intent.unsupportedCategory) {
+      if (user?.pendingQuery) {
+        await this.clearPendingQuery.execute(from);
+      }
+      await this.sender.sendTextMessage(
+        from,
+        this.withBankConfirmation(bankConfirmation, UNSUPPORTED_CATEGORY_MESSAGE),
+      );
+      return;
+    }
 
     // "me sirve", "voy ahora", "mañana entonces" no piden un dato nuevo,
     // reaccionan a lo último que recomendamos — no pasa por el Recommendation
