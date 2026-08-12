@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { BranchCandidate } from '../../domain/branches/branch-candidate';
 import { BRANCH_DIRECTORY_PROVIDER } from '../../domain/branches/branch-directory-provider.port';
 import type { BranchDirectoryProvider } from '../../domain/branches/branch-directory-provider.port';
+import { MvpCategoryName } from '../../domain/scraping/mvp-category';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 
 export interface ChainBranchSyncResult {
@@ -33,11 +34,21 @@ export class SyncBranchesUseCase {
   async execute(): Promise<ChainBranchSyncResult[]> {
     const chains = await this.prisma.merchantChain.findMany({
       where: { branches: { none: {} } },
+      include: { category: true },
     });
 
     const results: ChainBranchSyncResult[] = [];
     for (const chain of chains) {
-      results.push(await this.syncChain(chain.id, chain.name));
+      // Las 3 categorías del MVP están fijas y seedeadas con estos nombres
+      // exactos (ver mvp-category.ts) — el cast es seguro mientras eso siga
+      // siendo cierto.
+      results.push(
+        await this.syncChain(
+          chain.id,
+          chain.name,
+          chain.category.name as MvpCategoryName,
+        ),
+      );
     }
     return results;
   }
@@ -45,10 +56,11 @@ export class SyncBranchesUseCase {
   private async syncChain(
     chainId: string,
     chainName: string,
+    categoryName: MvpCategoryName,
   ): Promise<ChainBranchSyncResult> {
     let candidates: BranchCandidate[];
     try {
-      candidates = await this.provider.findBranches(chainName);
+      candidates = await this.provider.findBranches(chainName, categoryName);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(`Places falló para "${chainName}": ${error}`);
