@@ -82,6 +82,19 @@ function noRobotPhrases(): Check {
   };
 }
 
+/**
+ * Bug real en vivo: "asksLocation" contestaba reabriendo el pitch completo
+ * del descuento (comercio + banco + % + oferta de calcular ahorro) casi
+ * calcado al mensaje anterior, en vez de una respuesta corta y puntual
+ * sobre la ubicación. Tope de palabras como proxy de "no repitas todo".
+ */
+function isConcise(maxWords: number): Check {
+  return {
+    name: `es corta (<= ${maxWords} palabras, no repite el pitch completo)`,
+    predicate: (text) => text.trim().split(/\s+/).length <= maxWords,
+  };
+}
+
 const CASES: EvalCase[] = [
   {
     label: 'zone sin neighborhood en las opciones -> igual debe mencionar el barrio (bug encontrado en vivo)',
@@ -140,6 +153,7 @@ const CASES: EvalCase[] = [
     }),
     checks: [
       { name: 'dice la dirección real', predicate: (t) => t.includes('Bulevar España 2411') },
+      isConcise(35),
       noBannedWords(),
       noRobotPhrases(),
     ],
@@ -164,6 +178,7 @@ const CASES: EvalCase[] = [
           );
         },
       },
+      isConcise(35),
       noBannedWords(),
       noRobotPhrases(),
     ],
