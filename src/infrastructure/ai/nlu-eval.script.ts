@@ -126,6 +126,10 @@ const CASES: EvalCase[] = [
     expected: intent({ prefersToWait: true }),
   },
   {
+    message: 'y mañana?',
+    expected: intent({ prefersToWait: true }),
+  },
+  {
     message: 'mejor espero, no es urgente',
     expected: intent({ prefersToWait: true }),
   },

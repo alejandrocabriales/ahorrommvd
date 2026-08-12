@@ -235,6 +235,27 @@ describe('BrowseByCategoryUseCase', () => {
     expect(rec.spentAmount).toBe(600);
   });
 
+  it('also computes estimatedSaving for betterSoon when an amount is known, so $ hoy se puede comparar contra $ esperando', async () => {
+    const today = new Date();
+    const prisma = buildPrisma([
+      row({ merchantChainId: 'c1', merchantChainName: 'Farmashop', discountPercentage: 20, capAmount: 1500 }),
+      row({
+        merchantChainId: 'c2',
+        merchantChainName: 'San Roque',
+        discountPercentage: 40,
+        capAmount: 800,
+        validFrom: startOfDay(addDays(today, 1)),
+        validUntil: endOfDay(addDays(today, 1)),
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(prisma as never);
+
+    const rec = await useCase.execute('Farmacias', null, undefined, 4000);
+
+    expect(rec.estimatedSavingToday).toEqual({ amount: 800, cappedByBank: false });
+    expect(rec.betterSoon?.estimatedSaving).toEqual({ amount: 800, cappedByBank: true });
+  });
+
   it('leaves estimatedSavingToday/spentAmount null when no amount was given', async () => {
     const prisma = buildPrisma([
       row({

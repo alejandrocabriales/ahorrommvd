@@ -1,6 +1,7 @@
 import { SearchResponse } from '../../domain/search/search-response';
 import { Recommendation } from '../../domain/recommendation/recommendation';
 import { toRecommendationOption } from './recommendation-mapping';
+import { computeEstimatedSaving } from './search-message';
 
 type ResolvedSearchResponse = Extract<SearchResponse, { status: 'resolved' }>;
 
@@ -16,6 +17,9 @@ export function buildRecommendationFromSearch(
   amount: number | null = null,
 ): Recommendation {
   const place = result.branchName ?? result.merchantChainName;
+  const estimatedSavingBetterSoon = result.better
+    ? computeEstimatedSaving(result.better.promotion, amount ?? undefined)
+    : null;
 
   return {
     queryLabel: place,
@@ -36,6 +40,12 @@ export function buildRecommendationFromSearch(
             result.branchName ?? null,
           ),
           daysFromNow: result.better.daysFromNow,
+          estimatedSaving: estimatedSavingBetterSoon
+            ? {
+                amount: estimatedSavingBetterSoon.amount,
+                cappedByBank: estimatedSavingBetterSoon.cappedByBank,
+              }
+            : null,
         }
       : null,
     estimatedSavingToday: result.estimatedSaving

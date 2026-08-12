@@ -93,6 +93,9 @@ export class BrowseByCategoryUseCase {
 
     const comparison = computePromotionComparison(candidates, today);
     const estimatedSaving = computeEstimatedSaving(comparison.today, amount);
+    const estimatedSavingBetterSoon = comparison.better
+      ? computeEstimatedSaving(comparison.better.promotion, amount)
+      : null;
 
     const todayActive = bestPerChain(activeOn(candidates, today)).sort(
       (a, b) => b.discountPercentage - a.discountPercentage,
@@ -120,6 +123,12 @@ export class BrowseByCategoryUseCase {
               comparison.better.promotion.merchantChainName,
             ),
             daysFromNow: comparison.better.daysFromNow,
+            estimatedSaving: estimatedSavingBetterSoon
+              ? {
+                  amount: estimatedSavingBetterSoon.amount,
+                  cappedByBank: estimatedSavingBetterSoon.cappedByBank,
+                }
+              : null,
           }
         : null,
       estimatedSavingToday: estimatedSaving

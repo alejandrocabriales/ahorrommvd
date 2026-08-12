@@ -56,6 +56,12 @@ const BETTER_SOON: Recommendation['betterSoon'] = {
     cardName: null,
   },
   daysFromNow: 2,
+  estimatedSaving: null,
+};
+
+const BETTER_SOON_WITH_SAVING: Recommendation['betterSoon'] = {
+  ...BETTER_SOON!,
+  estimatedSaving: { amount: 1200, cappedByBank: false },
 };
 
 const BASE: Recommendation = {
@@ -92,6 +98,19 @@ describe('buildContextualShortReply', () => {
     expect(reply).toContain('$90');
   });
 
+  it('flags the cap explicitly when estimatedSavingToday hit the tope (§13)', () => {
+    const reply = buildContextualShortReply(
+      intent({ confirmsRecommendation: true }),
+      context({
+        ...BASE,
+        bestToday: BEST_TODAY,
+        estimatedSavingToday: { amount: 800, cappedByBank: true },
+      }),
+    );
+    expect(reply).toContain('$800');
+    expect(reply).toContain('tope');
+  });
+
   it('returns null on confirmsRecommendation when there is nothing to confirm', () => {
     const reply = buildContextualShortReply(
       intent({ confirmsRecommendation: true }),
@@ -109,6 +128,15 @@ describe('buildContextualShortReply', () => {
     expect(reply).toContain("McDonald's");
     expect(reply).toContain('OCA');
     expect(reply).toContain('30%');
+  });
+
+  it('compares $ directly instead of offering to calculate when estimatedSaving is already known (§6)', () => {
+    const reply = buildContextualShortReply(
+      intent({ prefersToWait: true }),
+      context({ ...BASE, betterSoon: BETTER_SOON_WITH_SAVING }),
+    );
+    expect(reply).toContain('$1200');
+    expect(reply).not.toContain('Avisame cuando quieras que te calcule');
   });
 
   it('returns null on prefersToWait when there is no known future improvement', () => {

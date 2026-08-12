@@ -730,6 +730,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
             cardName: null,
           },
           daysFromNow: 2,
+          estimatedSaving: null,
         },
       };
       const { useCase, browseByCategory, sender } = build(

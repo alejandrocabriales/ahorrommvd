@@ -28,15 +28,22 @@ export function buildContextualShortReply(
 
   if (intent.prefersToWait) {
     if (!recommendation.betterSoon) return null;
-    const { option, daysFromNow } = recommendation.betterSoon;
+    const { option, daysFromNow, estimatedSaving } = recommendation.betterSoon;
     const place = option.branchName ?? option.merchantChainName;
     const todayPart = recommendation.bestToday
       ? ` (contra el ${recommendation.bestToday.discountPercentage}% de hoy)`
       : '';
+    // Si ya sabemos cuánto piensa gastar, comparamos $ directo en vez de
+    // solo ofrecer calcularlo — mismo dato, una decisión más fácil de leer.
+    const savingPart = estimatedSaving
+      ? ` — unos $${estimatedSaving.amount} de ahorro${estimatedSaving.cappedByBank ? ' (tope de la promo)' : ''}`
+      : '';
+    const closing = estimatedSaving
+      ? ''
+      : ' Avisame cuando quieras que te calcule el ahorro con un monto.';
     return (
       `Dale, esperar conviene: ${dayLabel(daysFromNow)} ${place} tiene ` +
-      `${option.discountPercentage}% con ${option.bankName}${todayPart}. ` +
-      `Avisame cuando quieras que te calcule el ahorro con un monto.`
+      `${option.discountPercentage}% con ${option.bankName}${savingPart}${todayPart}.${closing}`
     );
   }
 
@@ -45,7 +52,7 @@ export function buildContextualShortReply(
     const { bestToday } = recommendation;
     const place = bestToday.branchName ?? bestToday.merchantChainName;
     const savingPart = recommendation.estimatedSavingToday
-      ? ` (unos $${recommendation.estimatedSavingToday.amount} de ahorro)`
+      ? ` (unos $${recommendation.estimatedSavingToday.amount} de ahorro${recommendation.estimatedSavingToday.cappedByBank ? ', tope de la promo' : ''})`
       : '';
     return `Perfecto. Andá con ${bestToday.bankName} en ${place} — ${bestToday.discountPercentage}%${savingPart}.`;
   }

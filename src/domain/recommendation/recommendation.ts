@@ -19,6 +19,8 @@ export interface RecommendationOption {
 export interface BetterSoon {
   option: RecommendationOption;
   daysFromNow: number;
+  /** Mismo cálculo que `Recommendation.estimatedSavingToday`, pero para la opción de esperar — permite comparar $ hoy contra $ esperando, no solo %. Solo si conocemos spentAmount. */
+  estimatedSaving: { amount: number; cappedByBank: boolean } | null;
 }
 
 /**

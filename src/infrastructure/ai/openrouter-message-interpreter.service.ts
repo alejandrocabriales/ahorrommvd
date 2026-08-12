@@ -23,7 +23,7 @@ Reglas:
 - showAllBanks: true SOLO si el usuario pide explícitamente ver ofertas de todos los bancos, no solo los suyos (ej. "dame todas las ofertas", "mostrame todo", "todas las promos", "de todos los bancos"). false en cualquier otro caso, incluso si no lo menciona.
 - wantsGeneralSavings: true si el usuario pide ahorrar o la mejor opción en general SIN nombrar comercio ni categoría (ej. "quiero ahorrar hoy", "qué me conviene hacer", "qué descuento hay hoy", "dame la mejor oferta"). false si ya hay merchantName o categoryName, o si el mensaje no tiene que ver con ahorrar.
 - confirmsRecommendation: true SOLO si el mensaje es una aceptación corta de algo que ya se venía hablando, sin nombrar comercio/categoría propios (ej. "me sirve", "dale", "voy ahora", "listo", "genial, gracias", "ya voy para allá"). false en cualquier otro caso, incluso si el mensaje es positivo pero trae su propio comercio o categoría.
-- prefersToWait: true SOLO si el mensaje dice que prefiere esperar a algo mejor que ya se venía hablando, sin nombrar comercio/categoría propios (ej. "mañana entonces", "mejor espero", "capaz la semana que viene", "no es urgente, espero"). false en cualquier otro caso.
+- prefersToWait: true SOLO si el mensaje dice que prefiere esperar a algo mejor que ya se venía hablando, O pregunta explícitamente por esa mejora futura, sin nombrar comercio/categoría propios (ej. "mañana entonces", "mejor espero", "capaz la semana que viene", "no es urgente, espero", "y mañana?", "¿y el jueves?"). false en cualquier otro caso.
 - confirmsRecommendation y prefersToWait nunca son true al mismo tiempo, y nunca son true si el mensaje también trae merchantName, categoryName o wantsGeneralSavings.`;
 
 const INTENT_JSON_SCHEMA = {

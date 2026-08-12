@@ -76,7 +76,40 @@ describe('buildRecommendationFromSearch', () => {
         discountPercentage: 40,
       }),
       daysFromNow: 1,
+      estimatedSaving: null,
     });
+  });
+
+  it('computes estimatedSaving for betterSoon too, so $ hoy se puede comparar contra $ esperando', () => {
+    const rec = buildRecommendationFromSearch(
+      resolved({
+        today: PROMO,
+        better: {
+          promotion: { ...PROMO, bankName: 'OCA', discountPercentage: 40, capAmount: 2000 },
+          daysFromNow: 1,
+        },
+      }),
+      null,
+      4000,
+    );
+
+    expect(rec.betterSoon?.estimatedSaving).toEqual({ amount: 1600, cappedByBank: false });
+  });
+
+  it('respects the cap on the betterSoon estimate too', () => {
+    const rec = buildRecommendationFromSearch(
+      resolved({
+        today: PROMO,
+        better: {
+          promotion: { ...PROMO, bankName: 'OCA', discountPercentage: 40, capAmount: 800 },
+          daysFromNow: 1,
+        },
+      }),
+      null,
+      4000,
+    );
+
+    expect(rec.betterSoon?.estimatedSaving).toEqual({ amount: 800, cappedByBank: true });
   });
 
   it('only carries a $ estimate when the backend actually computed one from a real amount', () => {
