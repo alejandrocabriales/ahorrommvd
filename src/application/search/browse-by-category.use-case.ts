@@ -19,6 +19,8 @@ const MAX_ALTERNATIVES = 3;
 interface CategoryCandidate extends PromotionSummary {
   merchantChainId: string;
   merchantChainName: string;
+  /** true si la cadena tiene al menos una `Branch` verificada por el backfill de Google Places (ver `SyncBranchesUseCase`) — es decir, confirmada en Montevideo, no solo "no chequeada todavía". */
+  hasVerifiedMontevideoBranch: boolean;
 }
 
 function bestPerChain(candidates: CategoryCandidate[]): CategoryCandidate[] {
@@ -75,10 +77,13 @@ export class BrowseByCategoryUseCase {
           ? { bank: { name: { in: [...allowedBankNames] } } }
           : {}),
       },
-      include: { bank: true, merchantChain: true },
+      include: {
+        bank: true,
+        merchantChain: { include: { _count: { select: { branches: true } } } },
+      },
     });
 
-    const candidates: CategoryCandidate[] = promotions.map((p) => ({
+    const candidatesRaw: CategoryCandidate[] = promotions.map((p) => ({
       merchantChainId: p.merchantChainId,
       merchantChainName: p.merchantChain.name,
       bankName: p.bank.name,
@@ -89,7 +94,19 @@ export class BrowseByCategoryUseCase {
       validFrom: p.validFrom,
       validUntil: p.validUntil,
       sourceUrl: p.sourceUrl,
+      hasVerifiedMontevideoBranch: p.merchantChain._count.branches > 0,
     }));
+
+    // Por default recomendamos solo cadenas con sucursal verificada en
+    // Montevideo (spec: "Zona: Montevideo únicamente") — bug real encontrado
+    // en vivo: "Soho" ganaba una recomendación de restaurante para "Barrio
+    // Sur" con el % más alto sin que nada supiera que el bar real está en
+    // Punta del Este. Si ninguna cadena tiene sucursal verificada todavía
+    // (categoría recién scrapeada, backfill no corrió aún) mostramos todo
+    // sin filtrar — mejor una recomendación sin verificar que "no encontré
+    // nada" cuando en realidad sí hay promos.
+    const verified = candidatesRaw.filter((c) => c.hasVerifiedMontevideoBranch);
+    const candidates = verified.length > 0 ? verified : candidatesRaw;
 
     const comparison = computePromotionComparison(candidates, today);
     const estimatedSaving = computeEstimatedSaving(comparison.today, amount);
