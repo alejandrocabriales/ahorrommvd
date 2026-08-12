@@ -566,6 +566,74 @@ dirección real del seed ("Av. Brasil 2846"). `npm run ai:test`: 28/29
 (97%). `npm run ai:test:response`: 20/21 (95%). Detalle completo,
 formato de 7 puntos, en `responses.md` #7.
 
+### 🟩 Post-launch — backfill de sucursales estaba contaminado, no solo desprolijo (12/08/2026)
+
+**Bug real de producción**: usuario reportó por WhatsApp que "Barrio Sur"
+tiró como sugerencia "Soho" (una promo real de Itaú/Santander) con la
+excusa de "no tengo dirección exacta en Barrio Sur", y que preguntar
+"donde queda Chajá" devolvió una dirección sin sentido ("El Chajá, 12500
+Montevideo") a kilómetros de cualquier local real.
+
+**Investigación**: ambos casos venían de `GooglePlacesBranchDirectoryProvider`
+(commit `4d81f79`, el backfill de Semana "post-launch" que resolvía el gap
+de las 128 cadenas sin `Branch`). El provider solo chequeaba que el
+resultado de Places tuviera nombre/dirección/coordenadas — nunca que
+fuera realmente el comercio buscado. Confirmado en vivo contra la Places
+API real:
+
+- **"Chajá Montevideo"** devuelve un solo resultado, y es una calle
+  (`types: ["route"]`), no un comercio.
+- **"Soho Montevideo"** — Soho es un bar real pero está en Punta del
+  Este (confirmado leyendo `santander.com.uy/beneficios/soho`), no en
+  Montevideo. La búsqueda, al no encontrar el bar real, devolvió 20
+  negocios sin relación que solo comparten el barrio "Soho" de
+  Montevideo (una casa de pinturas, un salón de belleza, una
+  concesionaria de autos).
+- Auditando la base de prod encontramos que **no era un caso aislado**:
+  776 de 784 `Branch` venían de este backfill (solo 8 son las
+  hand-seedeadas de Semana 1: Ta-Ta/Devoto/Farmashop/McDonald's). 49
+  filas tenían coordenadas fuera de Montevideo (Punta del Este, Colonia,
+  Tacuarembó, e incluso México/Argentina/España/Ecuador — nombres de
+  cadena genéricos matcheando negocios homónimos en otros países). 20
+  cadenas quedaron exactamente en 20 sucursales — el techo de resultados
+  por página de Text Search — señal de que el match real era mucho más
+  amplio y ruidoso de lo esperado. Casos confirmados 100% dentro de
+  Montevideo pero igual de contaminados: "Autoría Café" (11 cafés sin
+  relación entre sí bajo una sola "cadena" ficticia), "Boutique de
+  Carnes" (15 carnicerías/parrillas sin relación).
+
+**Fix** (`GooglePlacesBranchDirectoryProvider.findBranches`, ahora recibe
+también `categoryName`): tres filtros duros antes de aceptar un
+resultado de Places, en vez del único chequeo de "tiene nombre/dirección/
+coords" que había antes —
+1. `administrative_area_level_1 === "Departamento de Montevideo"` en
+   `addressComponents` (el `locationBias` del request es un sesgo, no un
+   filtro — probado, Google igual devuelve otros departamentos/países).
+2. `primaryType`/`types` del resultado tiene que caer en
+   `CATEGORY_PLACE_TYPES` (nuevo, `src/domain/branches/`) para la
+   categoría de la cadena — mata el caso "calle" y buena parte del ruido
+   de barrio.
+3. Nombre normalizado del resultado tiene que empezar con el nombre
+   normalizado de la cadena (`normalizeMerchantName`, extraído a
+   `src/domain/scraping/` para compartirlo con `matchMerchantChain` en
+   vez de duplicar la lógica) — prefijo y no igualdad exacta a propósito,
+   porque Google nombra sucursales como "Marca + local" (ej. "McDonald's
+   Punta Carretas Shopping"). Mata el resto del ruido de barrio (cafés/
+   bares reales pero sin relación con la cadena buscada).
+
+**Limpieza de prod ejecutada** (autorizada explícitamente por el
+usuario, alcance ampliado de "las ~30 cadenas mal" a "todo lo que no es
+seed" tras encontrar la contaminación dentro de Montevideo): borradas
+las 776 `Branch` no-seed, re-corrido `npm run branches:sync:prod` con el
+provider ya arreglado → 79 sucursales nuevas, verificadas: 0 cadenas en
+el techo de 20, 0 filas fuera de Montevideo, Soho y Chajá ahora
+correctamente en 0 sucursales (antes tenían datos inventados) en vez de
+inventar algo.
+
+5 specs nuevos/actualizados
+(`google-places-branch-directory.provider.spec.ts`, casos reales
+capturados a mano de Soho/Chajá/Santo Café). 152/152 tests verdes.
+
 ## Criterio de éxito del MVP
 
 Usuario manda "Ta-Ta Pocitos" por WhatsApp → responde en <2s con

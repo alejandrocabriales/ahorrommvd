@@ -3,8 +3,8 @@ import { BranchDirectoryProvider } from '../../domain/branches/branch-directory-
 import { SyncBranchesUseCase } from './sync-branches.use-case';
 
 const CHAINS_WITHOUT_BRANCHES = [
-  { id: 'chain-tata', name: 'Ta-Ta' },
-  { id: 'chain-chaja', name: 'Chajá' },
+  { id: 'chain-tata', name: 'Ta-Ta', category: { name: 'Supermercados' } },
+  { id: 'chain-chaja', name: 'Chajá', category: { name: 'Restaurantes' } },
 ];
 
 function candidate(overrides: Partial<BranchCandidate>): BranchCandidate {
@@ -73,6 +73,7 @@ describe('SyncBranchesUseCase', () => {
 
     expect(prisma.merchantChain.findMany).toHaveBeenCalledWith({
       where: { branches: { none: {} } },
+      include: { category: true },
     });
     expect(results).toEqual([
       { chainName: 'Ta-Ta', found: 2, saved: 2 },
