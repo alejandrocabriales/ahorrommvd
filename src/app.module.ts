@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { SavingsModule } from './application/savings/savings.module';
 import { SearchModule } from './application/search/search.module';
 import { WhatsAppModule } from './application/whatsapp/whatsapp.module';
+import { PlacesModule } from './infrastructure/places/places.module';
 import { PrismaModule } from './infrastructure/prisma/prisma.module';
 import { ScrapingModule } from './infrastructure/scrapers/scraping.module';
 import { HealthController } from './presentation/http/controllers/health.controller';
@@ -14,6 +15,7 @@ import { HealthController } from './presentation/http/controllers/health.control
     ScheduleModule.forRoot(),
     PrismaModule,
     ScrapingModule,
+    PlacesModule,
     SearchModule,
     SavingsModule,
     WhatsAppModule,
