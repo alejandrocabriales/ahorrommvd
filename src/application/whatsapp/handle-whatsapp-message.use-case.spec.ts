@@ -1,6 +1,7 @@
 import { PaymentType } from '../../../generated/prisma/client';
 import { MessageInterpreter } from '../../domain/ai/message-interpreter.port';
 import { ParsedIntent } from '../../domain/ai/parsed-intent';
+import { PendingQuery } from '../../domain/users/pending-query';
 import { SearchResponse } from '../../domain/search/search-response';
 import { WhatsAppSenderService } from '../../infrastructure/whatsapp/whatsapp-sender.service';
 import { RegisterSavingUseCase } from '../savings/register-saving.use-case';
@@ -11,6 +12,8 @@ import {
   ResolveUserUseCase,
 } from '../users/resolve-user.use-case';
 import { SetUserBanksUseCase } from '../users/set-user-banks.use-case';
+import { SavePendingQueryUseCase } from '../users/save-pending-query.use-case';
+import { ClearPendingQueryUseCase } from '../users/clear-pending-query.use-case';
 import { HandleWhatsAppMessageUseCase } from './handle-whatsapp-message.use-case';
 
 function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
@@ -26,11 +29,16 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
   };
 }
 
-const KNOWN_USER: ResolvedUser = { id: 'user-1', bankNames: ['Itaú'] };
+const KNOWN_USER: ResolvedUser = {
+  id: 'user-1',
+  bankNames: ['Itaú'],
+  pendingQuery: null,
+};
+const UNKNOWN_USER: ResolvedUser | null = null;
 
 describe('HandleWhatsAppMessageUseCase', () => {
   // Por default el usuario YA tiene bancos conocidos, así los tests de
-  // contenido no se pisan con el tip de "contame tus tarjetas" — ese
+  // contenido no se pisan con la pregunta de "qué tarjetas tenés" — ese
   // comportamiento se prueba aparte, explícito, más abajo.
   function build(
     parsedIntent: ParsedIntent,
@@ -78,6 +86,12 @@ describe('HandleWhatsAppMessageUseCase', () => {
         bankNames: ['Itaú', 'Santander'],
       }),
     } as unknown as SetUserBanksUseCase;
+    const savePendingQuery = {
+      execute: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SavePendingQueryUseCase;
+    const clearPendingQuery = {
+      execute: jest.fn().mockResolvedValue(undefined),
+    } as unknown as ClearPendingQueryUseCase;
     const sender = {
       sendTextMessage: jest.fn(),
     } as unknown as WhatsAppSenderService;
@@ -89,6 +103,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
       registerSaving,
       resolveUser,
       setUserBanks,
+      savePendingQuery,
+      clearPendingQuery,
       sender,
     );
     return {
@@ -99,6 +115,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
       registerSaving,
       resolveUser,
       setUserBanks,
+      savePendingQuery,
+      clearPendingQuery,
       sender,
     };
   }
@@ -270,45 +288,6 @@ describe('HandleWhatsAppMessageUseCase', () => {
       );
     });
 
-    it('appends a tip asking for the user cards when we still do not know them', async () => {
-      const { useCase, sender } = build(
-        intent({ merchantName: 'Ta-Ta' }),
-        {
-          status: 'resolved',
-          merchantChainName: 'Ta-Ta',
-          message: 'Hoy podés ahorrar 20%.',
-          today: null,
-          better: null,
-          upcoming: [],
-        },
-        null, // resolveUser -> nunca escribió antes, no sabemos sus bancos
-      );
-
-      await useCase.execute('598', 'Ta-Ta');
-
-      expect(sender.sendTextMessage).toHaveBeenCalledWith(
-        '598',
-        expect.stringContaining('contame qué tarjetas tenés'),
-      );
-    });
-
-    it('does not append the tip once we already know the user banks', async () => {
-      const { useCase, sender } = build(intent({ merchantName: 'Ta-Ta' }), {
-        status: 'resolved',
-        merchantChainName: 'Ta-Ta',
-        message: 'Hoy podés ahorrar 20%.',
-        today: null,
-        better: null,
-        upcoming: [],
-      });
-
-      await useCase.execute('598', 'Ta-Ta');
-
-      const [, sentMessage] = (sender.sendTextMessage as jest.Mock).mock
-        .calls[0] as [string, string];
-      expect(sentMessage).not.toContain('contame qué tarjetas tenés');
-    });
-
     it('bypasses the bank filter for this reply when the user asks for all offers, even with known banks', async () => {
       const { useCase, searchUseCase, sender } = build(
         intent({ merchantName: 'Ta-Ta', showAllBanks: true }),
@@ -330,9 +309,10 @@ describe('HandleWhatsAppMessageUseCase', () => {
         userId: undefined,
         amount: undefined,
       });
-      const [, sentMessage] = (sender.sendTextMessage as jest.Mock).mock
-        .calls[0] as [string, string];
-      expect(sentMessage).not.toContain('contame qué tarjetas tenés');
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        'Hoy podés ahorrar 20% con Santander.',
+      );
     });
 
     it('bypasses the filter for category browsing too, and does not touch saved banks', async () => {
@@ -349,6 +329,142 @@ describe('HandleWhatsAppMessageUseCase', () => {
         undefined,
       );
       expect(setUserBanks.execute).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('pregunta las tarjetas antes de contestar (usuario desconocido)', () => {
+    it('asks which banks instead of answering, and saves the query as pending', async () => {
+      const { useCase, searchUseCase, savePendingQuery, sender } = build(
+        intent({ merchantName: 'Ta-Ta', branchHint: 'Pocitos' }),
+        undefined,
+        UNKNOWN_USER,
+      );
+
+      await useCase.execute('598', 'Ta-Ta Pocitos');
+
+      expect(searchUseCase.execute).not.toHaveBeenCalled();
+      expect(savePendingQuery.execute).toHaveBeenCalledWith('598', {
+        merchantName: 'Ta-Ta',
+        branchHint: 'Pocitos',
+        categoryName: null,
+        zone: null,
+        amount: null,
+      });
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('¿Qué tarjetas tenés?'),
+      );
+    });
+
+    it('asks before browsing a category too (ej. "comida en Barrio Sur")', async () => {
+      const { useCase, browseByCategory, savePendingQuery, sender } = build(
+        intent({ categoryName: 'Restaurantes', zone: 'Barrio Sur' }),
+        undefined,
+        UNKNOWN_USER,
+      );
+
+      await useCase.execute('598', 'quiero comer algo en barrio sur');
+
+      expect(browseByCategory.execute).not.toHaveBeenCalled();
+      expect(savePendingQuery.execute).toHaveBeenCalledWith('598', {
+        merchantName: null,
+        branchHint: null,
+        categoryName: 'Restaurantes',
+        zone: 'Barrio Sur',
+        amount: null,
+      });
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('¿Qué tarjetas tenés?'),
+      );
+    });
+
+    it('does not ask when the user says "dame todas" right away — answers unfiltered directly', async () => {
+      const { useCase, browseByCategory, savePendingQuery, sender } = build(
+        intent({ categoryName: 'Restaurantes', showAllBanks: true }),
+        undefined,
+        UNKNOWN_USER,
+      );
+
+      await useCase.execute('598', 'dame todas las ofertas de restaurantes');
+
+      expect(browseByCategory.execute).toHaveBeenCalledWith(
+        'Restaurantes',
+        undefined,
+      );
+      expect(savePendingQuery.execute).not.toHaveBeenCalled();
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('Farmashop'),
+      );
+    });
+
+    const PENDING_RESTAURANTES: PendingQuery = {
+      merchantName: null,
+      branchHint: null,
+      categoryName: 'Restaurantes',
+      zone: 'Barrio Sur',
+      amount: null,
+    };
+
+    it('resumes the pending query filtered when the follow-up answers with banks', async () => {
+      const { useCase, browseByCategory, clearPendingQuery, sender } = build(
+        intent({ banks: ['Itaú'] }),
+        undefined,
+        // Refleja el estado YA actualizado tras el setUserBanks de este mismo mensaje.
+        { id: 'user-1', bankNames: ['Itaú'], pendingQuery: PENDING_RESTAURANTES },
+      );
+
+      await useCase.execute('598', 'tengo Itaú');
+
+      expect(browseByCategory.execute).toHaveBeenCalledWith(
+        'Restaurantes',
+        'user-1',
+      );
+      expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('Listo, guardé que tenés tarjetas de'),
+      );
+    });
+
+    it('resumes the pending query unfiltered when the follow-up says "dame todas"', async () => {
+      const { useCase, browseByCategory, clearPendingQuery, sender } = build(
+        intent({ showAllBanks: true }),
+        undefined,
+        { id: 'user-1', bankNames: [], pendingQuery: PENDING_RESTAURANTES },
+      );
+
+      await useCase.execute('598', 'dame todas');
+
+      expect(browseByCategory.execute).toHaveBeenCalledWith(
+        'Restaurantes',
+        undefined,
+      );
+      expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('Farmashop'),
+      );
+    });
+
+    it('drops the pending query (no infinite nagging) if the follow-up is unrelated — falls back to the generic clarification', async () => {
+      const { useCase, browseByCategory, savePendingQuery, clearPendingQuery, sender } =
+        build(intent({}), undefined, {
+          id: 'user-1',
+          bankNames: [],
+          pendingQuery: PENDING_RESTAURANTES,
+        });
+
+      await useCase.execute('598', 'hola');
+
+      expect(browseByCategory.execute).not.toHaveBeenCalled();
+      expect(savePendingQuery.execute).not.toHaveBeenCalled();
+      expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('No entendí'),
+      );
     });
   });
 });

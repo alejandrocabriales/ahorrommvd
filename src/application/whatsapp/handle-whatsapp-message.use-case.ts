@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { MESSAGE_INTERPRETER } from '../../domain/ai/message-interpreter.port';
 import type { MessageInterpreter } from '../../domain/ai/message-interpreter.port';
 import { ParsedIntent } from '../../domain/ai/parsed-intent';
+import { PendingQuery } from '../../domain/users/pending-query';
 import { SearchResponse } from '../../domain/search/search-response';
 import { WhatsAppSenderService } from '../../infrastructure/whatsapp/whatsapp-sender.service';
 import { RegisterSavingUseCase } from '../savings/register-saving.use-case';
@@ -10,20 +11,26 @@ import { buildCategoryBrowseMessage } from '../search/search-message';
 import { SearchUseCase } from '../search/search.use-case';
 import { ResolveUserUseCase } from '../users/resolve-user.use-case';
 import { SetUserBanksUseCase } from '../users/set-user-banks.use-case';
+import { SavePendingQueryUseCase } from '../users/save-pending-query.use-case';
+import { ClearPendingQueryUseCase } from '../users/clear-pending-query.use-case';
 
 const CANT_UNDERSTAND_MESSAGE =
   'No entendí bien qué buscás. Contame el nombre del comercio (ej. "Ta-Ta Pocitos") ' +
   'o qué tipo de lugar (ej. "necesito una farmacia").';
 const NOT_FOUND_MESSAGE =
   'No encontré ese comercio. ¿Podés escribir el nombre de nuevo?';
-const KNOW_YOUR_BANKS_TIP =
-  'Tip: contame qué tarjetas tenés (ej. "tengo Itaú y Santander") y te muestro ' +
-  'solo lo que podés usar de verdad.';
+const ASK_BANKS_MESSAGE =
+  '¿Qué tarjetas tenés? Contame (ej. "tengo Itaú y Santander") o escribí ' +
+  '"dame todas" para ver todas las ofertas sin filtrar.';
 
 /**
  * Orquesta un mensaje entrante: interpreta con IA (Semana 4) y resuelve con
  * el motor de búsqueda (Semana 3) — la IA nunca decide una promoción, solo
  * extrae qué preguntó el usuario para que el motor consulte la base.
+ *
+ * Si todavía no sabemos qué tarjetas tiene, preguntamos ANTES de contestar
+ * (no después con un tip) y guardamos la consulta como pendiente para
+ * retomarla en cuanto conteste — "tengo Itaú" filtra, "dame todas" no filtra.
  */
 @Injectable()
 export class HandleWhatsAppMessageUseCase {
@@ -37,6 +44,8 @@ export class HandleWhatsAppMessageUseCase {
     private readonly registerSaving: RegisterSavingUseCase,
     private readonly resolveUser: ResolveUserUseCase,
     private readonly setUserBanks: SetUserBanksUseCase,
+    private readonly savePendingQuery: SavePendingQueryUseCase,
+    private readonly clearPendingQuery: ClearPendingQueryUseCase,
     private readonly sender: WhatsAppSenderService,
   ) {}
 
@@ -58,13 +67,47 @@ export class HandleWhatsAppMessageUseCase {
     const user = await this.resolveUser.execute(from);
     const hasKnownBanks = (user?.bankNames.length ?? 0) > 0;
 
+    // Un mensaje "puro" de respuesta (sin comercio/categoría propios) que
+    // trae bancos o pide "todas" contesta la pregunta pendiente, si había.
+    const isAnswerToPending =
+      !intent.merchantName &&
+      !intent.categoryName &&
+      (intent.showAllBanks || (intent.banks?.length ?? 0) > 0);
+
+    const effectiveQuery: PendingQuery =
+      isAnswerToPending && user?.pendingQuery ? user.pendingQuery : intent;
+
+    const wantsAction = Boolean(
+      effectiveQuery.merchantName || effectiveQuery.categoryName,
+    );
+    const needsBankQuestion =
+      wantsAction && !hasKnownBanks && !intent.showAllBanks;
+
+    if (needsBankQuestion) {
+      // Recortado explícito a la forma de PendingQuery — effectiveQuery
+      // puede ser el ParsedIntent crudo (con banks/showAllBanks de más) y no
+      // queremos que eso termine serializado en la columna.
+      await this.savePendingQuery.execute(from, {
+        merchantName: effectiveQuery.merchantName,
+        branchHint: effectiveQuery.branchHint,
+        categoryName: effectiveQuery.categoryName,
+        zone: effectiveQuery.zone,
+        amount: effectiveQuery.amount,
+      });
+      await this.sender.sendTextMessage(from, ASK_BANKS_MESSAGE);
+      return;
+    }
+
+    if (user?.pendingQuery) {
+      await this.clearPendingQuery.execute(from);
+    }
+
     // showAllBanks pide explícitamente ignorar el filtro para ESTE mensaje
     // (ej. "dame todas las ofertas") — no borra ni toca los bancos guardados,
     // solo no los usamos como filtro en esta consulta puntual.
     const filterUserId = intent.showAllBanks ? undefined : user?.id;
-    const skipTip = hasKnownBanks || intent.showAllBanks;
 
-    const reply = await this.buildReply(from, intent, filterUserId, skipTip);
+    const reply = await this.buildReply(from, effectiveQuery, filterUserId);
     const finalReply = bankConfirmation
       ? `${bankConfirmation}\n\n${reply}`
       : reply;
@@ -74,29 +117,25 @@ export class HandleWhatsAppMessageUseCase {
 
   private async buildReply(
     from: string,
-    intent: ParsedIntent,
+    query: PendingQuery,
     filterUserId: string | undefined,
-    skipTip: boolean,
   ): Promise<string> {
-    if (intent.merchantName) {
-      const q = [intent.merchantName, intent.branchHint]
-        .filter(Boolean)
-        .join(' ');
+    if (query.merchantName) {
+      const q = [query.merchantName, query.branchHint].filter(Boolean).join(' ');
       const result = await this.searchUseCase.execute({
         q,
         userId: filterUserId,
-        amount: intent.amount ?? undefined,
+        amount: query.amount ?? undefined,
       });
-      return this.formatSearchResponse(from, result, intent.amount, skipTip);
+      return this.formatSearchResponse(from, result, query.amount);
     }
 
-    if (intent.categoryName) {
+    if (query.categoryName) {
       const options = await this.browseByCategory.execute(
-        intent.categoryName,
+        query.categoryName,
         filterUserId,
       );
-      const message = buildCategoryBrowseMessage(intent.categoryName, options);
-      return skipTip ? message : `${message}\n\n${KNOW_YOUR_BANKS_TIP}`;
+      return buildCategoryBrowseMessage(query.categoryName, options);
     }
 
     return CANT_UNDERSTAND_MESSAGE;
@@ -106,7 +145,6 @@ export class HandleWhatsAppMessageUseCase {
     from: string,
     result: SearchResponse,
     amount: number | null,
-    skipTip: boolean,
   ): Promise<string> {
     if (result.status === 'not_found') return NOT_FOUND_MESSAGE;
 
@@ -140,6 +178,6 @@ export class HandleWhatsAppMessageUseCase {
       }
     }
 
-    return skipTip ? message : `${message}\n\n${KNOW_YOUR_BANKS_TIP}`;
+    return message;
   }
 }

@@ -7,6 +7,7 @@ describe('ResolveUserUseCase', () => {
         findUnique: jest.fn().mockResolvedValue({
           id: 'user-1',
           banks: [{ name: 'Itaú' }, { name: 'Santander' }],
+          pendingQuery: null,
         }),
       },
     };
@@ -18,7 +19,35 @@ describe('ResolveUserUseCase', () => {
       where: { whatsapp: '598' },
       include: { banks: true },
     });
-    expect(result).toEqual({ id: 'user-1', bankNames: ['Itaú', 'Santander'] });
+    expect(result).toEqual({
+      id: 'user-1',
+      bankNames: ['Itaú', 'Santander'],
+      pendingQuery: null,
+    });
+  });
+
+  it('surfaces a pending query when the user has one waiting to be resumed', async () => {
+    const pendingQuery = {
+      merchantName: null,
+      branchHint: null,
+      categoryName: 'Restaurantes',
+      zone: 'Barrio Sur',
+      amount: null,
+    };
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          banks: [],
+          pendingQuery,
+        }),
+      },
+    };
+    const useCase = new ResolveUserUseCase(prisma as never);
+
+    const result = await useCase.execute('598');
+
+    expect(result?.pendingQuery).toEqual(pendingQuery);
   });
 
   it('returns null without creating anything when the user has never been seen before', async () => {

@@ -117,9 +117,12 @@ model User {
   preferredBranch Branch?     @relation("PreferredBranch", fields: [preferredBranchId], references: [id])
   savingLogs      SavingLog[]
   // Bancos con los que el usuario dijo que tiene tarjeta — sin esto no
-  // podemos filtrar las promos a lo que realmente puede usar. Se llena
-  // cuando lo menciona en un mensaje, nunca lo preguntamos de entrada.
+  // podemos filtrar las promos a lo que realmente puede usar.
   banks           Bank[]
+  // Consulta (comercio/categoría) que quedó esperando a que el usuario
+  // conteste "¿qué tarjetas tenés?" — se resuelve y se borra en el próximo
+  // mensaje. Shape: PendingQuery (src/domain/users/pending-query.ts).
+  pendingQuery    Json?       @map("pending_query")
 
   @@map("users")
 }
