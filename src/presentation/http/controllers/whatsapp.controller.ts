@@ -7,11 +7,13 @@ import {
   Logger,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HandleWhatsAppMessageUseCase } from '../../../application/whatsapp/handle-whatsapp-message.use-case';
 import { extractTextMessage } from '../../../infrastructure/whatsapp/whatsapp-webhook-payload';
 import type { WhatsAppWebhookPayload } from '../../../infrastructure/whatsapp/whatsapp-webhook-payload';
+import { WhatsAppSignatureGuard } from '../guards/whatsapp-signature.guard';
 
 @Controller('whatsapp/webhook')
 export class WhatsAppController {
@@ -42,8 +44,13 @@ export class WhatsAppController {
    * Meta espera un 200 rápido y reintenta si no lo recibe — devolvemos 200
    * también cuando el procesamiento falla (no queremos que reintente y
    * mande el mismo mensaje varias veces), solo lo logueamos.
+   *
+   * WhatsAppSignatureGuard va acá y no en el GET porque el handshake de
+   * verificación no manda firma — es un mecanismo distinto (Paso 8 de la
+   * guía de setup), solo el POST con mensajes reales viene firmado.
    */
   @Post()
+  @UseGuards(WhatsAppSignatureGuard)
   @HttpCode(200)
   async receive(
     @Body() payload: WhatsAppWebhookPayload,

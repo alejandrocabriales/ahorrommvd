@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Max,
   MinLength,
 } from 'class-validator';
 
@@ -16,5 +17,6 @@ export class BranchesSearchQueryDto {
   @Type(() => Number)
   @IsInt()
   @IsPositive()
+  @Max(50)
   limit?: number;
 }
