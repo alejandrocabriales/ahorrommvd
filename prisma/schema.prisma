@@ -22,6 +22,7 @@ model Bank {
   createdAt DateTime @default(now()) @map("created_at")
 
   promotions Promotion[]
+  users      User[]
 
   @@map("banks")
 }
@@ -45,6 +46,10 @@ model MerchantChain {
   promotions Promotion[]
 
   @@index([categoryId])
+  // Declarado acá (no solo en la migración de Semana 1) para que Prisma
+  // no lo vea como "drift" y proponga borrarlo en cada `migrate dev`
+  // futuro — nos pasó justo armando esta migración.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "merchant_chains_name_trgm_idx")
   @@map("merchant_chains")
 }
 
@@ -64,6 +69,8 @@ model Branch {
   preferredByUsers  User[]            @relation("PreferredBranch")
 
   @@unique([merchantChainId, name])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "branches_name_trgm_idx")
+  @@index([neighborhood(ops: raw("gin_trgm_ops"))], type: Gin, map: "branches_neighborhood_trgm_idx")
   @@map("branches")
 }
 
@@ -109,6 +116,10 @@ model User {
 
   preferredBranch Branch?     @relation("PreferredBranch", fields: [preferredBranchId], references: [id])
   savingLogs      SavingLog[]
+  // Bancos con los que el usuario dijo que tiene tarjeta — sin esto no
+  // podemos filtrar las promos a lo que realmente puede usar. Se llena
+  // cuando lo menciona en un mensaje, nunca lo preguntamos de entrada.
+  banks           Bank[]
 
   @@map("users")
 }

@@ -5,6 +5,7 @@ import {
   MessageInterpreter,
 } from '../../domain/ai/message-interpreter.port';
 import { ParsedIntent } from '../../domain/ai/parsed-intent';
+import { MVP_BANK_NAMES } from '../../domain/scraping/bank-name';
 import { MVP_CATEGORY_NAMES } from '../../domain/scraping/mvp-category';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -12,12 +13,14 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const SYSTEM_PROMPT = `Extraés la intención de un mensaje de WhatsApp de un usuario en Montevideo, Uruguay, que busca dónde y con qué tarjeta comprar más barato.
 
 Reglas:
-- Nunca inventes un comercio, sucursal o monto que el usuario no haya escrito. Si algo no está en el mensaje, ese campo va null.
+- Nunca inventes un comercio, sucursal, monto o banco que el usuario no haya escrito. Si algo no está en el mensaje, ese campo va null.
 - merchantName: nombre de cadena/comercio tal cual lo escribió el usuario, con errores de tipeo incluidos (ej. "tata", "farmashop"). null si no menciona ninguno.
 - branchHint: sucursal o barrio puntual mencionado junto al comercio (ej. "Ta-Ta Pocitos" -> "Pocitos"). null si no aplica.
 - categoryName: SOLO si el usuario no nombra un comercio puntual, uno de "${MVP_CATEGORY_NAMES.join('", "')}". Ej. "voy al súper" -> Supermercados, "necesito una farmacia" -> Farmacias, "quiero comer algo" -> Restaurantes. null si no aplica o si ya hay merchantName.
 - zone: barrio de Montevideo mencionado sin comercio específico (ej. "voy a Punta Carretas"). null si no aplica.
-- amount: monto en pesos uruguayos si el usuario dice cuánto gastó o va a gastar (ej. "Ta-Ta 4000" -> 4000). null si no menciona monto.`;
+- amount: monto en pesos uruguayos si el usuario dice cuánto gastó o va a gastar (ej. "Ta-Ta 4000" -> 4000). null si no menciona monto.
+- banks: lista de bancos con los que el usuario dice tener tarjeta, SOLO de "${MVP_BANK_NAMES.join('", "')}" (ej. "tengo Itaú y Santander" -> ["Itaú","Santander"], "mi tarjeta es OCA" -> ["OCA"]). Si menciona un banco que no es ninguno de esos tres, ignoralo. null si no menciona ningún banco en este mensaje.
+- showAllBanks: true SOLO si el usuario pide explícitamente ver ofertas de todos los bancos, no solo los suyos (ej. "dame todas las ofertas", "mostrame todo", "todas las promos", "de todos los bancos"). false en cualquier otro caso, incluso si no lo menciona.`;
 
 const INTENT_JSON_SCHEMA = {
   name: 'parsed_intent',
@@ -33,8 +36,21 @@ const INTENT_JSON_SCHEMA = {
       },
       zone: { type: ['string', 'null'] },
       amount: { type: ['number', 'null'] },
+      banks: {
+        type: ['array', 'null'],
+        items: { type: 'string', enum: [...MVP_BANK_NAMES] },
+      },
+      showAllBanks: { type: 'boolean' },
     },
-    required: ['merchantName', 'branchHint', 'categoryName', 'zone', 'amount'],
+    required: [
+      'merchantName',
+      'branchHint',
+      'categoryName',
+      'zone',
+      'amount',
+      'banks',
+      'showAllBanks',
+    ],
     additionalProperties: false,
   },
 };

@@ -100,4 +100,53 @@ describe('computePromotionComparison', () => {
 
     expect(result.upcoming).toHaveLength(2);
   });
+
+  describe('allowedBankNames (spec real-mundo: no mostrar bancos que el usuario no tiene)', () => {
+    it('ignores promotions from banks not in the allowed set, even if they are objectively better', () => {
+      const santanderToday = summary({
+        bankName: 'Santander',
+        discountPercentage: 20,
+      });
+      const ocaTomorrow = summary({
+        bankName: 'OCA',
+        discountPercentage: 40,
+        validFrom: daysFrom(TODAY, 1),
+        validUntil: daysFrom(TODAY, 1),
+      });
+
+      const result = computePromotionComparison(
+        [santanderToday, ocaTomorrow],
+        TODAY,
+        new Set(['Santander']),
+      );
+
+      expect(result.today?.bankName).toBe('Santander');
+      // OCA da más %, pero el usuario no tiene tarjeta OCA -> no se sugiere esperar por algo que no puede usar.
+      expect(result.better).toBeNull();
+    });
+
+    it('returns today: null when the only active promotion belongs to a bank the user does not have', () => {
+      const ocaOnly = summary({ bankName: 'OCA', discountPercentage: 40 });
+
+      const result = computePromotionComparison(
+        [ocaOnly],
+        TODAY,
+        new Set(['Itaú']),
+      );
+
+      expect(result.today).toBeNull();
+      expect(result.upcoming).toHaveLength(0);
+    });
+
+    it('does not filter anything when allowedBankNames is null/undefined (bancos del usuario todavía desconocidos)', () => {
+      const ocaOnly = summary({ bankName: 'OCA', discountPercentage: 40 });
+
+      expect(
+        computePromotionComparison([ocaOnly], TODAY, null).today?.bankName,
+      ).toBe('OCA');
+      expect(computePromotionComparison([ocaOnly], TODAY).today?.bankName).toBe(
+        'OCA',
+      );
+    });
+  });
 });

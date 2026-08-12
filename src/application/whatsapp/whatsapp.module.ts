@@ -5,10 +5,11 @@ import { WhatsAppController } from '../../presentation/http/controllers/whatsapp
 import { WhatsAppSignatureGuard } from '../../presentation/http/guards/whatsapp-signature.guard';
 import { SavingsModule } from '../savings/savings.module';
 import { SearchModule } from '../search/search.module';
+import { UsersModule } from '../users/users.module';
 import { HandleWhatsAppMessageUseCase } from './handle-whatsapp-message.use-case';
 
 @Module({
-  imports: [AiModule, SearchModule, SavingsModule],
+  imports: [AiModule, SearchModule, SavingsModule, UsersModule],
   controllers: [WhatsAppController],
   providers: [
     WhatsAppSenderService,

@@ -50,6 +50,7 @@ export class SearchUseCase {
     const comparison = await this.getComparison.execute(
       resolution.merchantChainId,
       resolution.branchId,
+      input.userId,
     );
     const estimatedSaving = computeEstimatedSaving(
       comparison.today,

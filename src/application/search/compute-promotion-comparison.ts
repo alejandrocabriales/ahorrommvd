@@ -47,17 +47,28 @@ function pickBest(promotions: PromotionSummary[]): PromotionSummary | null {
  * días. "better" solo se llena si el próximo mejor % le gana estrictamente
  * al de hoy (o no hay nada hoy) — si lo de hoy ya es lo mejor de la semana,
  * no tiene sentido decirle al usuario que espere.
+ *
+ * `allowedBankNames`: cuando sabemos con qué bancos tiene tarjeta el
+ * usuario, filtramos ANTES de comparar — no tiene sentido decirle "OCA
+ * tiene 40%" a alguien que no tiene tarjeta OCA, no puede usar ese
+ * descuento. `null`/`undefined` (todavía no sabemos sus tarjetas) no
+ * filtra nada, se comporta como antes.
  */
 export function computePromotionComparison(
   promotions: PromotionSummary[],
   today: Date,
+  allowedBankNames?: Set<string> | null,
 ): PromotionComparison {
-  const bestToday = pickBest(activeOn(promotions, today));
+  const candidates = allowedBankNames
+    ? promotions.filter((p) => allowedBankNames.has(p.bankName))
+    : promotions;
+
+  const bestToday = pickBest(activeOn(candidates, today));
 
   let better: PromotionComparison['better'] = null;
   for (let daysFromNow = 1; daysFromNow <= 7; daysFromNow++) {
     const candidate = pickBest(
-      activeOn(promotions, addDays(today, daysFromNow)),
+      activeOn(candidates, addDays(today, daysFromNow)),
     );
     if (!candidate) continue;
 
@@ -72,5 +83,5 @@ export function computePromotionComparison(
     }
   }
 
-  return { today: bestToday, better, upcoming: promotions };
+  return { today: bestToday, better, upcoming: candidates };
 }

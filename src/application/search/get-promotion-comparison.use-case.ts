@@ -10,6 +10,7 @@ import {
   endOfDay,
   startOfDay,
 } from './compute-promotion-comparison';
+import { getAllowedBankNames } from './get-allowed-bank-names';
 
 @Injectable()
 export class GetPromotionComparisonUseCase {
@@ -18,12 +19,13 @@ export class GetPromotionComparisonUseCase {
   async execute(
     merchantChainId: string,
     branchId?: string,
+    userId?: string,
   ): Promise<PromotionComparison> {
-    const promotions = await this.getApplicablePromotions(
-      merchantChainId,
-      branchId,
-    );
-    return computePromotionComparison(promotions, new Date());
+    const [promotions, allowedBankNames] = await Promise.all([
+      this.getApplicablePromotions(merchantChainId, branchId),
+      getAllowedBankNames(this.prisma, userId),
+    ]);
+    return computePromotionComparison(promotions, new Date(), allowedBankNames);
   }
 
   private async getApplicablePromotions(

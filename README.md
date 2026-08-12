@@ -111,8 +111,10 @@ Requiere `OPENROUTER_API_KEY` (y opcionalmente `OPENROUTER_MODEL`, default
 app, número de test, ngrok para exponer el webhook en local).
 
 ```bash
-# Prueba la interpretación de lenguaje natural contra OpenRouter/GPT-4o
-# directo, sin levantar toda la app ni necesitar WhatsApp configurado
+# Eval de la interpretación NLU contra OpenRouter/GPT-4o de verdad (sin
+# mockear) — corre ~16 mensajes con la respuesta esperada y mide % de
+# campos/casos correctos. Usar para comparar antes/después de tocar el
+# prompt, el schema o el modelo.
 npm run ai:test
 
 # Simula un mensaje real de WhatsApp llegando al webhook (con la app corriendo)

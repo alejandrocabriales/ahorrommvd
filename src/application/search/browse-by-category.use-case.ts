@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { MvpCategoryName } from '../../domain/scraping/mvp-category';
 import { PromotionSummary } from '../../domain/search/search-result';
+import { getAllowedBankNames } from './get-allowed-bank-names';
 
 export interface CategoryOption {
   merchantChainId: string;
@@ -25,15 +26,21 @@ export class BrowseByCategoryUseCase {
 
   async execute(
     categoryName: MvpCategoryName,
+    userId?: string,
     limit = DEFAULT_LIMIT,
   ): Promise<CategoryOption[]> {
     const today = new Date();
+    const allowedBankNames = await getAllowedBankNames(this.prisma, userId);
+
     const promotions = await this.prisma.promotion.findMany({
       where: {
         appliesToAllBranches: true,
         validFrom: { lte: today },
         validUntil: { gte: today },
         merchantChain: { category: { name: categoryName } },
+        ...(allowedBankNames
+          ? { bank: { name: { in: [...allowedBankNames] } } }
+          : {}),
       },
       include: { bank: true, merchantChain: true },
       orderBy: { discountPercentage: 'desc' },

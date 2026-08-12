@@ -1,3 +1,4 @@
+import { MvpBankName } from '../scraping/bank-name';
 import { MvpCategoryName } from '../scraping/mvp-category';
 
 /**
@@ -18,4 +19,8 @@ export interface ParsedIntent {
   zone: string | null;
   /** Monto en pesos uruguayos si el usuario menciona cuánto gastó, ej. "Ta-Ta 4000". */
   amount: number | null;
+  /** Bancos con los que el usuario dice tener tarjeta, ej. "tengo Itaú y Santander". null si no lo menciona en este mensaje. */
+  banks: MvpBankName[] | null;
+  /** true si el usuario pidió explícitamente ver ofertas de todos los bancos, no solo los suyos (ej. "dame todas las ofertas"). */
+  showAllBanks: boolean;
 }
