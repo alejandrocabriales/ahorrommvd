@@ -11,4 +11,5 @@ export interface PendingQuery {
   categoryName: MvpCategoryName | null;
   zone: string | null;
   amount: number | null;
+  wantsGeneralSavings: boolean;
 }

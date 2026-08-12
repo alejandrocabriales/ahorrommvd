@@ -23,4 +23,6 @@ export interface ParsedIntent {
   banks: MvpBankName[] | null;
   /** true si el usuario pidió explícitamente ver ofertas de todos los bancos, no solo los suyos (ej. "dame todas las ofertas"). */
   showAllBanks: boolean;
+  /** true si pide ahorrar/la mejor opción en general, sin nombrar comercio ni categoría (ej. "quiero ahorrar hoy", "qué me conviene hacer"). */
+  wantsGeneralSavings: boolean;
 }

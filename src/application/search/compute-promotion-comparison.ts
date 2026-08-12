@@ -1,7 +1,4 @@
-import {
-  PromotionComparison,
-  PromotionSummary,
-} from '../../domain/search/search-result';
+import { PromotionSummary } from '../../domain/search/search-result';
 
 export function startOfDay(date: Date): Date {
   const d = new Date(date);
@@ -21,10 +18,10 @@ export function addDays(date: Date, days: number): Date {
   return d;
 }
 
-function activeOn(
-  promotions: PromotionSummary[],
+export function activeOn<T extends PromotionSummary>(
+  promotions: T[],
   day: Date,
-): PromotionSummary[] {
+): T[] {
   const dayStart = startOfDay(day);
   const dayEnd = endOfDay(day);
   return promotions.filter(
@@ -32,7 +29,7 @@ function activeOn(
   );
 }
 
-function pickBest(promotions: PromotionSummary[]): PromotionSummary | null {
+function pickBest<T extends PromotionSummary>(promotions: T[]): T | null {
   if (promotions.length === 0) return null;
   return [...promotions].sort((a, b) => {
     if (b.discountPercentage !== a.discountPercentage) {
@@ -54,18 +51,18 @@ function pickBest(promotions: PromotionSummary[]): PromotionSummary | null {
  * descuento. `null`/`undefined` (todavía no sabemos sus tarjetas) no
  * filtra nada, se comporta como antes.
  */
-export function computePromotionComparison(
-  promotions: PromotionSummary[],
+export function computePromotionComparison<T extends PromotionSummary>(
+  promotions: T[],
   today: Date,
   allowedBankNames?: Set<string> | null,
-): PromotionComparison {
+): { today: T | null; better: { promotion: T; daysFromNow: number } | null; upcoming: T[] } {
   const candidates = allowedBankNames
     ? promotions.filter((p) => allowedBankNames.has(p.bankName))
     : promotions;
 
   const bestToday = pickBest(activeOn(candidates, today));
 
-  let better: PromotionComparison['better'] = null;
+  let better: { promotion: T; daysFromNow: number } | null = null;
   for (let daysFromNow = 1; daysFromNow <= 7; daysFromNow++) {
     const candidate = pickBest(
       activeOn(candidates, addDays(today, daysFromNow)),

@@ -20,7 +20,8 @@ Reglas:
 - zone: barrio de Montevideo mencionado sin comercio específico (ej. "voy a Punta Carretas"). null si no aplica.
 - amount: monto en pesos uruguayos si el usuario dice cuánto gastó o va a gastar (ej. "Ta-Ta 4000" -> 4000). null si no menciona monto.
 - banks: lista de bancos con los que el usuario dice tener tarjeta, SOLO de "${MVP_BANK_NAMES.join('", "')}" (ej. "tengo Itaú y Santander" -> ["Itaú","Santander"], "mi tarjeta es OCA" -> ["OCA"]). Si menciona un banco que no es ninguno de esos tres, ignoralo. null si no menciona ningún banco en este mensaje.
-- showAllBanks: true SOLO si el usuario pide explícitamente ver ofertas de todos los bancos, no solo los suyos (ej. "dame todas las ofertas", "mostrame todo", "todas las promos", "de todos los bancos"). false en cualquier otro caso, incluso si no lo menciona.`;
+- showAllBanks: true SOLO si el usuario pide explícitamente ver ofertas de todos los bancos, no solo los suyos (ej. "dame todas las ofertas", "mostrame todo", "todas las promos", "de todos los bancos"). false en cualquier otro caso, incluso si no lo menciona.
+- wantsGeneralSavings: true si el usuario pide ahorrar o la mejor opción en general SIN nombrar comercio ni categoría (ej. "quiero ahorrar hoy", "qué me conviene hacer", "qué descuento hay hoy", "dame la mejor oferta"). false si ya hay merchantName o categoryName, o si el mensaje no tiene que ver con ahorrar.`;
 
 const INTENT_JSON_SCHEMA = {
   name: 'parsed_intent',
@@ -41,6 +42,7 @@ const INTENT_JSON_SCHEMA = {
         items: { type: 'string', enum: [...MVP_BANK_NAMES] },
       },
       showAllBanks: { type: 'boolean' },
+      wantsGeneralSavings: { type: 'boolean' },
     },
     required: [
       'merchantName',
@@ -50,6 +52,7 @@ const INTENT_JSON_SCHEMA = {
       'amount',
       'banks',
       'showAllBanks',
+      'wantsGeneralSavings',
     ],
     additionalProperties: false,
   },

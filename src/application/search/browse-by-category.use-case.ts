@@ -2,64 +2,120 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { MvpCategoryName } from '../../domain/scraping/mvp-category';
 import { PromotionSummary } from '../../domain/search/search-result';
+import { Recommendation } from '../../domain/recommendation/recommendation';
+import {
+  activeOn,
+  addDays,
+  computePromotionComparison,
+  endOfDay,
+  startOfDay,
+} from './compute-promotion-comparison';
 import { getAllowedBankNames } from './get-allowed-bank-names';
+import { toRecommendationOption } from './recommendation-mapping';
 
-export interface CategoryOption {
+const MAX_ALTERNATIVES = 3;
+
+interface CategoryCandidate extends PromotionSummary {
   merchantChainId: string;
   merchantChainName: string;
-  today: PromotionSummary;
 }
 
-const DEFAULT_LIMIT = 5;
+function bestPerChain(candidates: CategoryCandidate[]): CategoryCandidate[] {
+  const byChain = new Map<string, CategoryCandidate>();
+  for (const c of candidates) {
+    const existing = byChain.get(c.merchantChainId);
+    if (!existing || c.discountPercentage > existing.discountPercentage) {
+      byChain.set(c.merchantChainId, c);
+    }
+  }
+  return [...byChain.values()];
+}
 
 /**
  * Cuando el usuario no nombra un comercio puntual ("voy al súper",
  * "necesito una farmacia") no hay nada que resolver con
- * ResolveMerchantUseCase — en vez de preguntar el nombre exacto, mostramos
- * las mejores promos de hoy en esa categoría para que elija. Solo mira
- * promos de cadena completa (appliesToAllBranches) porque no hay sucursal
- * en juego todavía.
+ * ResolveMerchantUseCase — arma una Recommendation con la mejor opción de
+ * la categoría hoy, hasta 3 alternativas, y si conviene esperar (comparando
+ * el mejor de la categoría hoy contra el mejor de la categoría en los
+ * próximos 7 días). Solo mira promos de cadena completa
+ * (appliesToAllBranches) porque no hay sucursal en juego todavía.
+ *
+ * `categoryName` null = sin categoría puntual, mirá las 3 del MVP juntas
+ * (ej. "quiero ahorrar hoy", "qué me conviene hacer" — el usuario no dijo
+ * ni comercio ni categoría, quiere la mejor oferta de Montevideo).
  */
 @Injectable()
 export class BrowseByCategoryUseCase {
   constructor(private readonly prisma: PrismaService) {}
 
   async execute(
-    categoryName: MvpCategoryName,
+    categoryName: MvpCategoryName | null,
+    zone: string | null,
     userId?: string,
-    limit = DEFAULT_LIMIT,
-  ): Promise<CategoryOption[]> {
+  ): Promise<Recommendation> {
     const today = new Date();
     const allowedBankNames = await getAllowedBankNames(this.prisma, userId);
 
     const promotions = await this.prisma.promotion.findMany({
       where: {
         appliesToAllBranches: true,
-        validFrom: { lte: today },
-        validUntil: { gte: today },
-        merchantChain: { category: { name: categoryName } },
+        validFrom: { lte: endOfDay(addDays(today, 7)) },
+        validUntil: { gte: startOfDay(today) },
+        ...(categoryName
+          ? { merchantChain: { category: { name: categoryName } } }
+          : {}),
         ...(allowedBankNames
           ? { bank: { name: { in: [...allowedBankNames] } } }
           : {}),
       },
       include: { bank: true, merchantChain: true },
-      orderBy: { discountPercentage: 'desc' },
-      take: limit,
     });
 
-    return promotions.map((p) => ({
+    const candidates: CategoryCandidate[] = promotions.map((p) => ({
       merchantChainId: p.merchantChainId,
       merchantChainName: p.merchantChain.name,
-      today: {
-        bankName: p.bank.name,
-        discountPercentage: Number(p.discountPercentage),
-        paymentType: p.paymentType,
-        cardName: p.cardName,
-        capAmount: p.capAmount === null ? null : Number(p.capAmount),
-        validFrom: p.validFrom,
-        validUntil: p.validUntil,
-        sourceUrl: p.sourceUrl,
-      },
+      bankName: p.bank.name,
+      discountPercentage: Number(p.discountPercentage),
+      paymentType: p.paymentType,
+      cardName: p.cardName,
+      capAmount: p.capAmount === null ? null : Number(p.capAmount),
+      validFrom: p.validFrom,
+      validUntil: p.validUntil,
+      sourceUrl: p.sourceUrl,
     }));
+
+    const comparison = computePromotionComparison(candidates, today);
+
+    const todayActive = bestPerChain(activeOn(candidates, today)).sort(
+      (a, b) => b.discountPercentage - a.discountPercentage,
+    );
+    const alternatives = todayActive
+      .filter((c) => c.merchantChainId !== comparison.today?.merchantChainId)
+      .slice(0, MAX_ALTERNATIVES);
+
+    return {
+      queryLabel: categoryName ?? 'lo mejor de hoy en Montevideo',
+      zone,
+      bestToday: comparison.today
+        ? toRecommendationOption(
+            comparison.today,
+            comparison.today.merchantChainName,
+          )
+        : null,
+      alternatives: alternatives.map((c) =>
+        toRecommendationOption(c, c.merchantChainName),
+      ),
+      betterSoon: comparison.better
+        ? {
+            option: toRecommendationOption(
+              comparison.better.promotion,
+              comparison.better.promotion.merchantChainName,
+            ),
+            daysFromNow: comparison.better.daysFromNow,
+          }
+        : null,
+      estimatedSavingToday: null, // no hay monto: el usuario no pidió un comercio puntual con importe
+      nothingFound: !comparison.today && !comparison.better,
+    };
   }
 }

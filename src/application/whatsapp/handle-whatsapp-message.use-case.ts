@@ -1,13 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { MESSAGE_INTERPRETER } from '../../domain/ai/message-interpreter.port';
 import type { MessageInterpreter } from '../../domain/ai/message-interpreter.port';
-import { ParsedIntent } from '../../domain/ai/parsed-intent';
+import { RESPONSE_GENERATOR } from '../../domain/ai/response-generator.port';
+import type { ResponseGenerator } from '../../domain/ai/response-generator.port';
 import { PendingQuery } from '../../domain/users/pending-query';
+import { Recommendation } from '../../domain/recommendation/recommendation';
 import { SearchResponse } from '../../domain/search/search-response';
 import { WhatsAppSenderService } from '../../infrastructure/whatsapp/whatsapp-sender.service';
 import { RegisterSavingUseCase } from '../savings/register-saving.use-case';
 import { BrowseByCategoryUseCase } from '../search/browse-by-category.use-case';
-import { buildCategoryBrowseMessage } from '../search/search-message';
+import { buildRecommendationFromSearch } from '../search/build-recommendation-from-search';
 import { SearchUseCase } from '../search/search.use-case';
 import { ResolveUserUseCase } from '../users/resolve-user.use-case';
 import { SetUserBanksUseCase } from '../users/set-user-banks.use-case';
@@ -24,9 +26,11 @@ const ASK_BANKS_MESSAGE =
   '"dame todas" para ver todas las ofertas sin filtrar.';
 
 /**
- * Orquesta un mensaje entrante: interpreta con IA (Semana 4) y resuelve con
- * el motor de búsqueda (Semana 3) — la IA nunca decide una promoción, solo
- * extrae qué preguntó el usuario para que el motor consulte la base.
+ * Orquesta un mensaje entrante en 3 capas: Intent Parser (IA, interpreta
+ * qué preguntó), Recommendation Engine (backend puro, resuelve la
+ * comparación hoy-vs-7-días y arma una Recommendation), Response Generator
+ * (IA, la redacta como una recomendación — nunca decide promociones, eso ya
+ * viene resuelto).
  *
  * Si todavía no sabemos qué tarjetas tiene, preguntamos ANTES de contestar
  * (no después con un tip) y guardamos la consulta como pendiente para
@@ -39,6 +43,8 @@ export class HandleWhatsAppMessageUseCase {
   constructor(
     @Inject(MESSAGE_INTERPRETER)
     private readonly interpreter: MessageInterpreter,
+    @Inject(RESPONSE_GENERATOR)
+    private readonly responseGenerator: ResponseGenerator,
     private readonly searchUseCase: SearchUseCase,
     private readonly browseByCategory: BrowseByCategoryUseCase,
     private readonly registerSaving: RegisterSavingUseCase,
@@ -78,7 +84,9 @@ export class HandleWhatsAppMessageUseCase {
       isAnswerToPending && user?.pendingQuery ? user.pendingQuery : intent;
 
     const wantsAction = Boolean(
-      effectiveQuery.merchantName || effectiveQuery.categoryName,
+      effectiveQuery.merchantName ||
+        effectiveQuery.categoryName ||
+        effectiveQuery.wantsGeneralSavings,
     );
     const needsBankQuestion =
       wantsAction && !hasKnownBanks && !intent.showAllBanks;
@@ -93,6 +101,7 @@ export class HandleWhatsAppMessageUseCase {
         categoryName: effectiveQuery.categoryName,
         zone: effectiveQuery.zone,
         amount: effectiveQuery.amount,
+        wantsGeneralSavings: effectiveQuery.wantsGeneralSavings,
       });
       await this.sender.sendTextMessage(from, ASK_BANKS_MESSAGE);
       return;
@@ -127,24 +136,47 @@ export class HandleWhatsAppMessageUseCase {
         userId: filterUserId,
         amount: query.amount ?? undefined,
       });
-      return this.formatSearchResponse(from, result, query.amount);
+      return this.formatSearchResponse(from, result, query.amount, query.zone);
     }
 
     if (query.categoryName) {
-      const options = await this.browseByCategory.execute(
+      const recommendation = await this.browseByCategory.execute(
         query.categoryName,
+        query.zone,
         filterUserId,
       );
-      return buildCategoryBrowseMessage(query.categoryName, options);
+      return this.respondToRecommendation(recommendation);
+    }
+
+    if (query.wantsGeneralSavings) {
+      // Sin comercio ni categoría puntual ("quiero ahorrar hoy") -> mirá
+      // las 3 categorías del MVP juntas y traé la mejor oferta de todas.
+      const recommendation = await this.browseByCategory.execute(
+        null,
+        query.zone,
+        filterUserId,
+      );
+      return this.respondToRecommendation(recommendation);
     }
 
     return CANT_UNDERSTAND_MESSAGE;
+  }
+
+  /** Response Generator solo entra en juego cuando hay algo real que recomendar — nada que redactar si no hay data. */
+  private async respondToRecommendation(
+    recommendation: Recommendation,
+  ): Promise<string> {
+    if (recommendation.nothingFound) {
+      return `No encontré promociones vigentes para ${recommendation.queryLabel} en los próximos 7 días.`;
+    }
+    return this.responseGenerator.generate(recommendation);
   }
 
   private async formatSearchResponse(
     from: string,
     result: SearchResponse,
     amount: number | null,
+    zone: string | null,
   ): Promise<string> {
     if (result.status === 'not_found') return NOT_FOUND_MESSAGE;
 
@@ -158,7 +190,8 @@ export class HandleWhatsAppMessageUseCase {
       return `¿En cuál ${result.merchantChainName}?\n${options}`;
     }
 
-    let message = result.message;
+    const recommendation = buildRecommendationFromSearch(result, zone);
+    let message = await this.respondToRecommendation(recommendation);
 
     // Registro opcional de gasto (spec): si el usuario ya mandó comercio +
     // monto en el mismo mensaje (ej. "Ta-Ta 4000") y resolvimos una

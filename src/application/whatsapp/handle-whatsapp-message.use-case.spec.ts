@@ -1,8 +1,11 @@
 import { PaymentType } from '../../../generated/prisma/client';
 import { MessageInterpreter } from '../../domain/ai/message-interpreter.port';
+import { ResponseGenerator } from '../../domain/ai/response-generator.port';
 import { ParsedIntent } from '../../domain/ai/parsed-intent';
+import { Recommendation } from '../../domain/recommendation/recommendation';
 import { PendingQuery } from '../../domain/users/pending-query';
 import { SearchResponse } from '../../domain/search/search-response';
+import { PromotionSummary } from '../../domain/search/search-result';
 import { WhatsAppSenderService } from '../../infrastructure/whatsapp/whatsapp-sender.service';
 import { RegisterSavingUseCase } from '../savings/register-saving.use-case';
 import { BrowseByCategoryUseCase } from '../search/browse-by-category.use-case';
@@ -25,6 +28,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     amount: null,
     banks: null,
     showAllBanks: false,
+    wantsGeneralSavings: false,
     ...overrides,
   };
 }
@@ -35,6 +39,37 @@ const KNOWN_USER: ResolvedUser = {
   pendingQuery: null,
 };
 const UNKNOWN_USER: ResolvedUser | null = null;
+
+const TODAY_PROMO: PromotionSummary = {
+  bankName: 'Santander',
+  discountPercentage: 20,
+  paymentType: PaymentType.CREDITO,
+  cardName: null,
+  capAmount: null,
+  validFrom: new Date('2020-01-01'),
+  validUntil: new Date('2999-01-01'),
+  sourceUrl: 'https://example.com',
+};
+
+const DEFAULT_RECOMMENDATION: Recommendation = {
+  queryLabel: 'Farmacias',
+  zone: null,
+  bestToday: {
+    merchantChainName: 'Farmashop',
+    branchName: null,
+    neighborhood: null,
+    bankName: 'Itaú',
+    discountPercentage: 15,
+    paymentType: PaymentType.CREDITO,
+    cardName: null,
+  },
+  alternatives: [],
+  betterSoon: null,
+  estimatedSavingToday: null,
+  nothingFound: false,
+};
+
+const DEFAULT_AI_REPLY = 'La mejor opción es Farmashop con Itaú, 15%.';
 
 describe('HandleWhatsAppMessageUseCase', () => {
   // Por default el usuario YA tiene bancos conocidos, así los tests de
@@ -48,26 +83,14 @@ describe('HandleWhatsAppMessageUseCase', () => {
     const interpreter: MessageInterpreter = {
       interpret: jest.fn().mockResolvedValue(parsedIntent),
     };
+    const responseGenerator: ResponseGenerator = {
+      generate: jest.fn().mockResolvedValue(DEFAULT_AI_REPLY),
+    };
     const searchUseCase = {
       execute: jest.fn().mockResolvedValue(searchResult),
     } as unknown as SearchUseCase;
     const browseByCategory = {
-      execute: jest.fn().mockResolvedValue([
-        {
-          merchantChainId: 'c1',
-          merchantChainName: 'Farmashop',
-          today: {
-            bankName: 'Itaú',
-            discountPercentage: 15,
-            paymentType: PaymentType.CREDITO,
-            cardName: null,
-            capAmount: null,
-            validFrom: new Date(),
-            validUntil: new Date(),
-            sourceUrl: 'https://example.com',
-          },
-        },
-      ]),
+      execute: jest.fn().mockResolvedValue(DEFAULT_RECOMMENDATION),
     } as unknown as BrowseByCategoryUseCase;
     const registerSaving = {
       execute: jest.fn().mockResolvedValue({
@@ -98,6 +121,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     const useCase = new HandleWhatsAppMessageUseCase(
       interpreter,
+      responseGenerator,
       searchUseCase,
       browseByCategory,
       registerSaving,
@@ -110,6 +134,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
     return {
       useCase,
       interpreter,
+      responseGenerator,
       searchUseCase,
       browseByCategory,
       registerSaving,
@@ -121,17 +146,17 @@ describe('HandleWhatsAppMessageUseCase', () => {
     };
   }
 
-  it('builds a q from merchantName+branchHint, passes userId through, and forwards the resolved message', async () => {
-    const { useCase, searchUseCase, sender } = build(
+  it('builds a q from merchantName+branchHint, passes userId through, and sends the AI-generated recommendation', async () => {
+    const { useCase, searchUseCase, responseGenerator, sender } = build(
       intent({ merchantName: 'Ta-Ta', branchHint: 'Pocitos', amount: 4000 }),
       {
         status: 'resolved',
         merchantChainName: 'Ta-Ta',
         branchName: 'Ta-Ta Pocitos',
         message: 'Hoy podés ahorrar 20%.',
-        today: null,
+        today: TODAY_PROMO,
         better: null,
-        upcoming: [],
+        upcoming: [TODAY_PROMO],
       },
     );
 
@@ -142,13 +167,19 @@ describe('HandleWhatsAppMessageUseCase', () => {
       userId: 'user-1',
       amount: 4000,
     });
+    expect(responseGenerator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryLabel: 'Ta-Ta Pocitos',
+        bestToday: expect.objectContaining({ bankName: 'Santander' }),
+      }),
+    );
     expect(sender.sendTextMessage).toHaveBeenCalledWith(
       '59891234567',
-      'Hoy podés ahorrar 20%.',
+      DEFAULT_AI_REPLY,
     );
   });
 
-  it('registers the spend and appends the confirmation when amount + a resolved branchId are both present', async () => {
+  it('registers the spend and appends the confirmation after the AI recommendation', async () => {
     const { useCase, registerSaving, sender } = build(
       intent({ merchantName: 'Ta-Ta', amount: 4000 }),
       {
@@ -157,9 +188,9 @@ describe('HandleWhatsAppMessageUseCase', () => {
         branchId: 'branch-pocitos',
         branchName: 'Ta-Ta Pocitos',
         message: 'Hoy podés ahorrar 20%.',
-        today: null,
+        today: TODAY_PROMO,
         better: null,
-        upcoming: [],
+        upcoming: [TODAY_PROMO],
       },
     );
 
@@ -172,18 +203,17 @@ describe('HandleWhatsAppMessageUseCase', () => {
     );
     expect(sender.sendTextMessage).toHaveBeenCalledWith(
       '598',
-      'Hoy podés ahorrar 20%.\n\nRegistrado. Ahorraste aproximadamente $800. Total registrado este mes: $2350.',
+      `${DEFAULT_AI_REPLY}\n\nRegistrado. Ahorraste aproximadamente $800. Total registrado este mes: $2350.`,
     );
   });
 
-  it('does not register a spend when the merchant only resolved at chain level (no branchId)', async () => {
-    const { useCase, registerSaving, sender } = build(
+  it('skips the AI call and does not register a spend when there is nothing to recommend', async () => {
+    const { useCase, registerSaving, responseGenerator, sender } = build(
       intent({ merchantName: 'Bardo', amount: 500 }),
       {
         status: 'resolved',
         merchantChainName: 'Bardo',
-        message:
-          'No encontré promociones vigentes para Bardo en los próximos 7 días.',
+        message: 'irrelevante',
         today: null,
         better: null,
         upcoming: [],
@@ -192,6 +222,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     await useCase.execute('598', 'Bardo 500');
 
+    expect(responseGenerator.generate).not.toHaveBeenCalled();
     expect(registerSaving.execute).not.toHaveBeenCalled();
     expect(sender.sendTextMessage).toHaveBeenCalledWith(
       '598',
@@ -234,7 +265,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
     );
   });
 
-  it('browses by category (passing userId through) when there is no specific merchant', async () => {
+  it('browses by category (passing zone+userId through) and sends the AI-generated recommendation', async () => {
     const { useCase, browseByCategory, sender } = build(
       intent({ categoryName: 'Farmacias' }),
     );
@@ -243,11 +274,44 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     expect(browseByCategory.execute).toHaveBeenCalledWith(
       'Farmacias',
+      null,
       'user-1',
     );
     expect(sender.sendTextMessage).toHaveBeenCalledWith(
       '598',
-      expect.stringContaining('Farmashop'),
+      DEFAULT_AI_REPLY,
+    );
+  });
+
+  it('threads the mentioned zone through to category browsing', async () => {
+    const { useCase, browseByCategory } = build(
+      intent({ categoryName: 'Restaurantes', zone: 'Barrio Sur' }),
+    );
+
+    await useCase.execute('598', 'quiero comer algo en barrio sur');
+
+    expect(browseByCategory.execute).toHaveBeenCalledWith(
+      'Restaurantes',
+      'Barrio Sur',
+      'user-1',
+    );
+  });
+
+  it('browses across all 3 MVP categories when the user wants general savings with no merchant/category (ej. "quiero ahorrar hoy")', async () => {
+    const { useCase, browseByCategory, sender } = build(
+      intent({ wantsGeneralSavings: true }),
+    );
+
+    await useCase.execute('598', 'quiero ahorrar hoy');
+
+    expect(browseByCategory.execute).toHaveBeenCalledWith(
+      null,
+      null,
+      'user-1',
+    );
+    expect(sender.sendTextMessage).toHaveBeenCalledWith(
+      '598',
+      DEFAULT_AI_REPLY,
     );
   });
 
@@ -263,16 +327,16 @@ describe('HandleWhatsAppMessageUseCase', () => {
   });
 
   describe('bancos del usuario', () => {
-    it('saves the mentioned banks and prepends a confirmation to the reply', async () => {
+    it('saves the mentioned banks and prepends a confirmation to the AI reply', async () => {
       const { useCase, setUserBanks, sender } = build(
         intent({ merchantName: 'Ta-Ta', banks: ['Itaú', 'Santander'] }),
         {
           status: 'resolved',
           merchantChainName: 'Ta-Ta',
-          message: 'Hoy podés ahorrar 20%.',
-          today: null,
+          message: 'irrelevante',
+          today: TODAY_PROMO,
           better: null,
-          upcoming: [],
+          upcoming: [TODAY_PROMO],
         },
       );
 
@@ -284,7 +348,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
       ]);
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
         '598',
-        'Listo, guardé que tenés tarjetas de Itaú, Santander.\n\nHoy podés ahorrar 20%.',
+        `Listo, guardé que tenés tarjetas de Itaú, Santander.\n\n${DEFAULT_AI_REPLY}`,
       );
     });
 
@@ -294,10 +358,10 @@ describe('HandleWhatsAppMessageUseCase', () => {
         {
           status: 'resolved',
           merchantChainName: 'Ta-Ta',
-          message: 'Hoy podés ahorrar 20% con Santander.',
-          today: null,
+          message: 'irrelevante',
+          today: TODAY_PROMO,
           better: null,
-          upcoming: [],
+          upcoming: [TODAY_PROMO],
         },
         KNOWN_USER, // ya sabemos que tiene Itaú
       );
@@ -311,7 +375,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
       });
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
         '598',
-        'Hoy podés ahorrar 20% con Santander.',
+        DEFAULT_AI_REPLY,
       );
     });
 
@@ -326,6 +390,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Farmacias',
+        null,
         undefined,
       );
       expect(setUserBanks.execute).not.toHaveBeenCalled();
@@ -349,6 +414,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
         categoryName: null,
         zone: null,
         amount: null,
+        wantsGeneralSavings: false,
       });
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
         '598',
@@ -372,6 +438,31 @@ describe('HandleWhatsAppMessageUseCase', () => {
         categoryName: 'Restaurantes',
         zone: 'Barrio Sur',
         amount: null,
+        wantsGeneralSavings: false,
+      });
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('¿Qué tarjetas tenés?'),
+      );
+    });
+
+    it('asks before a general-savings query too (ej. "qué me conviene hacer")', async () => {
+      const { useCase, browseByCategory, savePendingQuery, sender } = build(
+        intent({ wantsGeneralSavings: true }),
+        undefined,
+        UNKNOWN_USER,
+      );
+
+      await useCase.execute('598', 'qué me conviene hacer');
+
+      expect(browseByCategory.execute).not.toHaveBeenCalled();
+      expect(savePendingQuery.execute).toHaveBeenCalledWith('598', {
+        merchantName: null,
+        branchHint: null,
+        categoryName: null,
+        zone: null,
+        amount: null,
+        wantsGeneralSavings: true,
       });
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
         '598',
@@ -390,12 +481,13 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Restaurantes',
+        null,
         undefined,
       );
       expect(savePendingQuery.execute).not.toHaveBeenCalled();
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
         '598',
-        expect.stringContaining('Farmashop'),
+        DEFAULT_AI_REPLY,
       );
     });
 
@@ -405,6 +497,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
       categoryName: 'Restaurantes',
       zone: 'Barrio Sur',
       amount: null,
+      wantsGeneralSavings: false,
     };
 
     it('resumes the pending query filtered when the follow-up answers with banks', async () => {
@@ -419,6 +512,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Restaurantes',
+        'Barrio Sur',
         'user-1',
       );
       expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
@@ -439,12 +533,13 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Restaurantes',
+        'Barrio Sur',
         undefined,
       );
       expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
         '598',
-        expect.stringContaining('Farmashop'),
+        DEFAULT_AI_REPLY,
       );
     });
 

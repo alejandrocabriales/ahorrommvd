@@ -367,6 +367,73 @@ Movida a `.env` y `.env.example` restaurado a placeholder vacío.
   del spec, pero es una simplificación real, no el flujo conversacional
   completo que describe el spec.
 
+### 🟩 Post-launch — deploy, hardening, personalización, copiloto conversacional (12/08/2026)
+
+Todo lo de abajo está commiteado, testeado (100 tests unitarios) y
+validado en vivo contra Postgres real + OpenRouter real (no solo mocks).
+Nota: la sección "Semana 4" de arriba quedó desactualizada en varios
+puntos (deploy, seguridad, flujo con estado) — esto la reemplaza.
+
+**Deploy a producción (Railway)**: hecho. App + Postgres en el mismo
+proyecto Railway, WhatsApp Cloud API con token permanente de System User
+(App + WABA como assets separados), validado end-to-end con el número
+real del usuario.
+
+**Seguridad**: firma HMAC-SHA256 del webhook de Meta (`X-Hub-Signature-256`)
+validada con `timingSafeEqual`, fail-closed si falta `WHATSAPP_APP_SECRET`
+o el raw body. Rate limit en `/branches/search` (`@Max(50)`). Dos leaks
+de secretos reales (OpenRouter key, connection string de prod) detectados
+por diff antes de cualquier commit — nunca llegaron al historial de git.
+
+**Personalización por banco** (`prisma/migrations/..._user_banks`,
+`..._pending_query`): el bot solo muestra promos de los bancos que el
+usuario dijo tener. Si no sabemos sus tarjetas todavía, **pregunta antes
+de contestar** (no con un tip al final) y guarda la consulta como
+pendiente (`User.pendingQuery`, JSON) para retomarla filtrada apenas
+contesta — "dame todas" salta el filtro para esa respuesta puntual sin
+tocar los bancos guardados. Ver `src/application/users/`,
+`src/domain/users/pending-query.ts`.
+
+**Copiloto conversacional (3 capas)** — pedido explícito: "no responder
+preguntas, resolver decisiones", no una lista de buscador. Se separó en:
+
+1. **Intent Parser** (IA) — `OpenRouterMessageInterpreter`, extrae
+   `ParsedIntent` incluyendo ahora `showAllBanks` y `wantsGeneralSavings`
+   (ej. "quiero ahorrar hoy", "qué me conviene hacer" → sin comercio ni
+   categoría, mira las 3 categorías del MVP juntas).
+2. **Recommendation Engine** (backend puro, CERO IA) —
+   `BrowseByCategoryUseCase` y `buildRecommendationFromSearch` arman un
+   `Recommendation` único (`src/domain/recommendation/recommendation.ts`):
+   mejor opción hoy, hasta 3 alternativas, "¿conviene esperar?" (mejor
+   opción en los próximos 7 días que le gana a la de hoy — a nivel
+   categoría completa, no solo por comercio), y ahorro en $ SOLO si el
+   usuario dio un monto real.
+3. **Response Generator** (IA) — `OpenRouterResponseGenerator`, segunda
+   llamada a OpenRouter que redacta el `Recommendation` en lenguaje
+   natural decisivo (mejor opción / alternativas / conviene esperar /
+   una sola pregunta de cierre). Nunca decide promociones, nunca inventa
+   datos fuera del JSON que recibe. Los estados simples (no encontrado,
+   desambiguar, preguntar bancos, no entendí) siguen siendo strings fijos
+   — no vale la pena el costo/latencia de IA para eso.
+
+Validado en vivo con datos reales: "Ta-Ta Pocitos" con banco filtrado
+(`betterSoon: null` manejado con gracia, sin inventar que conviene
+esperar), "restaurantes" con nada hoy pero algo en 2 días, "quiero ahorrar
+hoy" cruzando las 3 categorías. Ver `responses.md` para el playbook
+completo con ejemplos reales de la base de datos.
+
+**Limitación real de datos, no de diseño**: 0 de 8 sucursales tienen
+coordenadas cargadas, y 128 de 132 cadenas no tienen ni una sola sucursal
+con dirección (son promos de cadena completa). Por eso el bot **no**
+prioriza por ubicación GPS automática ni afirma cercanía real — el barrio
+que el usuario escribe es informativo (`Recommendation.zone`), nunca un
+filtro de proximidad. Backfill de direcciones/coordenadas queda como
+proyecto de datos aparte, no de esta capa conversacional.
+
+**Pendiente**: aplicar las migraciones `user_banks` y `pending_query` a
+producción (`DATABASE_URL="<public-url>" npx prisma migrate deploy`) —
+hechas y probadas en local, todavía no corridas contra la base de Railway.
+
 ## Criterio de éxito del MVP
 
 Usuario manda "Ta-Ta Pocitos" por WhatsApp → responde en <2s con

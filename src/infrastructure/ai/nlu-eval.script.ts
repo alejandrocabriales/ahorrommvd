@@ -22,6 +22,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     amount: null,
     banks: null,
     showAllBanks: false,
+    wantsGeneralSavings: false,
     ...overrides,
   };
 }
@@ -68,6 +69,22 @@ const CASES: EvalCase[] = [
     expected: intent({ categoryName: 'Restaurantes' }), // "de todo" != pedir todos los bancos
   },
   { message: 'Farmashop 1500', expected: intent({ merchantName: 'Farmashop', amount: 1500 }) },
+  {
+    message: 'quiero ahorrar hoy',
+    expected: intent({ wantsGeneralSavings: true }),
+  },
+  {
+    message: 'qué me conviene hacer',
+    expected: intent({ wantsGeneralSavings: true }),
+  },
+  {
+    message: 'tengo que hacer el súper',
+    expected: intent({ categoryName: 'Supermercados' }),
+  },
+  {
+    message: 'quiero salir a comer',
+    expected: intent({ categoryName: 'Restaurantes' }),
+  },
   { message: 'hola', expected: intent({}) },
   { message: 'Devoto Malvin', expected: intent({ merchantName: 'Devoto', branchHint: 'Malvin' }) },
 ];

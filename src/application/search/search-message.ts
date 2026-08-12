@@ -3,7 +3,6 @@ import {
   PromotionComparison,
   PromotionSummary,
 } from '../../domain/search/search-result';
-import { CategoryOption } from './browse-by-category.use-case';
 
 /** Ej. "Ta-Ta 4000" -> 20% hoy -> ahorro estimado $800, respetando el tope del banco si hay. */
 export function computeEstimatedSaving(
@@ -66,21 +65,4 @@ export function buildSearchMessage(params: {
   }
 
   return parts.join(' ');
-}
-
-/** Para "voy al súper" / "necesito una farmacia": no hay comercio puntual, mostramos opciones. */
-export function buildCategoryBrowseMessage(
-  categoryName: string,
-  options: CategoryOption[],
-): string {
-  if (options.length === 0) {
-    return `No encontré promociones vigentes hoy en ${categoryName.toLowerCase()}.`;
-  }
-
-  const lines = options.map(
-    (o) =>
-      `- ${o.merchantChainName}: ${o.today.discountPercentage}% con ${o.today.bankName}`,
-  );
-
-  return `Hoy en ${categoryName.toLowerCase()} tenés estas opciones:\n${lines.join('\n')}\n¿Cuál te interesa?`;
 }
