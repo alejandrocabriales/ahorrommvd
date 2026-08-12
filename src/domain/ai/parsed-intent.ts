@@ -25,4 +25,8 @@ export interface ParsedIntent {
   showAllBanks: boolean;
   /** true si pide ahorrar/la mejor opción en general, sin nombrar comercio ni categoría (ej. "quiero ahorrar hoy", "qué me conviene hacer"). */
   wantsGeneralSavings: boolean;
+  /** true si el mensaje acepta/confirma la recomendación anterior de la charla, sin agregar comercio/categoría propios (ej. "me sirve", "dale", "voy ahora", "listo"). Solo tiene efecto si hay contexto reciente que confirmar. */
+  confirmsRecommendation: boolean;
+  /** true si el mensaje dice que prefiere esperar a una mejora futura ya mencionada en la charla, sin agregar comercio/categoría propios (ej. "mañana entonces", "mejor espero", "capaz la semana que viene"). Solo tiene efecto si hay contexto reciente con una mejora futura. */
+  prefersToWait: boolean;
 }

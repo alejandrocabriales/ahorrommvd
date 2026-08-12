@@ -23,6 +23,8 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     banks: null,
     showAllBanks: false,
     wantsGeneralSavings: false,
+    confirmsRecommendation: false,
+    prefersToWait: false,
     ...overrides,
   };
 }
@@ -33,12 +35,30 @@ interface EvalCase {
 }
 
 const CASES: EvalCase[] = [
-  { message: 'Ta-Ta Pocitos', expected: intent({ merchantName: 'Ta-Ta', branchHint: 'Pocitos' }) },
-  { message: 'tata 4000', expected: intent({ merchantName: 'tata', amount: 4000 }) },
-  { message: 'Voy al súper', expected: intent({ categoryName: 'Supermercados' }) },
-  { message: 'Necesito una farmacia', expected: intent({ categoryName: 'Farmacias' }) },
-  { message: 'Quiero comer algo rico', expected: intent({ categoryName: 'Restaurantes' }) },
-  { message: 'Voy a Punta Carretas', expected: intent({ zone: 'Punta Carretas' }) },
+  {
+    message: 'Ta-Ta Pocitos',
+    expected: intent({ merchantName: 'Ta-Ta', branchHint: 'Pocitos' }),
+  },
+  {
+    message: 'tata 4000',
+    expected: intent({ merchantName: 'tata', amount: 4000 }),
+  },
+  {
+    message: 'Voy al súper',
+    expected: intent({ categoryName: 'Supermercados' }),
+  },
+  {
+    message: 'Necesito una farmacia',
+    expected: intent({ categoryName: 'Farmacias' }),
+  },
+  {
+    message: 'Quiero comer algo rico',
+    expected: intent({ categoryName: 'Restaurantes' }),
+  },
+  {
+    message: 'Voy a Punta Carretas',
+    expected: intent({ zone: 'Punta Carretas' }),
+  },
   {
     message: 'tengo Itaú y Santander',
     expected: intent({ banks: ['Itaú', 'Santander'] }),
@@ -68,7 +88,10 @@ const CASES: EvalCase[] = [
     message: 'quiero comer de todo, tengo hambre',
     expected: intent({ categoryName: 'Restaurantes' }), // "de todo" != pedir todos los bancos
   },
-  { message: 'Farmashop 1500', expected: intent({ merchantName: 'Farmashop', amount: 1500 }) },
+  {
+    message: 'Farmashop 1500',
+    expected: intent({ merchantName: 'Farmashop', amount: 1500 }),
+  },
   {
     message: 'quiero ahorrar hoy',
     expected: intent({ wantsGeneralSavings: true }),
@@ -86,7 +109,31 @@ const CASES: EvalCase[] = [
     expected: intent({ categoryName: 'Restaurantes' }),
   },
   { message: 'hola', expected: intent({}) },
-  { message: 'Devoto Malvin', expected: intent({ merchantName: 'Devoto', branchHint: 'Malvin' }) },
+  {
+    message: 'Devoto Malvin',
+    expected: intent({ merchantName: 'Devoto', branchHint: 'Malvin' }),
+  },
+  {
+    message: 'me sirve',
+    expected: intent({ confirmsRecommendation: true }),
+  },
+  {
+    message: 'dale, voy ahora',
+    expected: intent({ confirmsRecommendation: true }),
+  },
+  {
+    message: 'mañana entonces',
+    expected: intent({ prefersToWait: true }),
+  },
+  {
+    message: 'mejor espero, no es urgente',
+    expected: intent({ prefersToWait: true }),
+  },
+  {
+    // Trae comercio propio -> no es una confirmación de lo anterior, es un tema nuevo.
+    message: 'dale, y Devoto?',
+    expected: intent({ merchantName: 'Devoto' }),
+  },
 ];
 
 interface FieldDiff {
@@ -158,7 +205,9 @@ async function main() {
   // Umbral bajo a propósito (el LLM no es determinístico) — el objetivo es
   // detectar una regresión grande, no exigir 100%.
   if (casesOk / CASES.length < 0.85) {
-    console.error('\nAccuracy por debajo del umbral (85%) — revisar prompt/schema/modelo.');
+    console.error(
+      '\nAccuracy por debajo del umbral (85%) — revisar prompt/schema/modelo.',
+    );
     process.exitCode = 1;
   }
 }

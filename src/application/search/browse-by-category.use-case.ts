@@ -12,6 +12,7 @@ import {
 } from './compute-promotion-comparison';
 import { getAllowedBankNames } from './get-allowed-bank-names';
 import { toRecommendationOption } from './recommendation-mapping';
+import { computeEstimatedSaving } from './search-message';
 
 const MAX_ALTERNATIVES = 3;
 
@@ -43,6 +44,11 @@ function bestPerChain(candidates: CategoryCandidate[]): CategoryCandidate[] {
  * `categoryName` null = sin categoría puntual, mirá las 3 del MVP juntas
  * (ej. "quiero ahorrar hoy", "qué me conviene hacer" — el usuario no dijo
  * ni comercio ni categoría, quiere la mejor oferta de Montevideo).
+ *
+ * `amount` es opcional y solo llega de un mensaje de seguimiento (ej.
+ * "farmacias" y después "600 pesos") — cuando está, calculamos el ahorro
+ * en pesos contra `bestToday`, igual que ya hace el flujo de comercio
+ * puntual en `buildRecommendationFromSearch`.
  */
 @Injectable()
 export class BrowseByCategoryUseCase {
@@ -52,6 +58,7 @@ export class BrowseByCategoryUseCase {
     categoryName: MvpCategoryName | null,
     zone: string | null,
     userId?: string,
+    amount?: number,
   ): Promise<Recommendation> {
     const today = new Date();
     const allowedBankNames = await getAllowedBankNames(this.prisma, userId);
@@ -85,6 +92,7 @@ export class BrowseByCategoryUseCase {
     }));
 
     const comparison = computePromotionComparison(candidates, today);
+    const estimatedSaving = computeEstimatedSaving(comparison.today, amount);
 
     const todayActive = bestPerChain(activeOn(candidates, today)).sort(
       (a, b) => b.discountPercentage - a.discountPercentage,
@@ -114,8 +122,14 @@ export class BrowseByCategoryUseCase {
             daysFromNow: comparison.better.daysFromNow,
           }
         : null,
-      estimatedSavingToday: null, // no hay monto: el usuario no pidió un comercio puntual con importe
+      estimatedSavingToday: estimatedSaving
+        ? {
+            amount: estimatedSaving.amount,
+            cappedByBank: estimatedSaving.cappedByBank,
+          }
+        : null,
       nothingFound: !comparison.today && !comparison.better,
+      spentAmount: amount ?? null,
     };
   }
 }

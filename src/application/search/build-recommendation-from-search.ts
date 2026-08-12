@@ -13,6 +13,7 @@ type ResolvedSearchResponse = Extract<SearchResponse, { status: 'resolved' }>;
 export function buildRecommendationFromSearch(
   result: ResolvedSearchResponse,
   zone: string | null,
+  amount: number | null = null,
 ): Recommendation {
   const place = result.branchName ?? result.merchantChainName;
 
@@ -44,5 +45,6 @@ export function buildRecommendationFromSearch(
         }
       : null,
     nothingFound: !result.today && !result.better,
+    spentAmount: amount,
   };
 }

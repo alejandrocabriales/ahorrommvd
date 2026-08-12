@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { PendingQuery } from '../../domain/users/pending-query';
+import { ConversationContext } from '../../domain/users/conversation-context';
 
 export interface ResolvedUser {
   id: string;
   bankNames: string[];
   pendingQuery: PendingQuery | null;
+  conversationContext: ConversationContext | null;
+  knownZone: string | null;
 }
 
 /**
@@ -29,6 +32,9 @@ export class ResolveUserUseCase {
       id: user.id,
       bankNames: user.banks.map((b) => b.name),
       pendingQuery: (user.pendingQuery as PendingQuery | null) ?? null,
+      conversationContext:
+        (user.conversationContext as ConversationContext | null) ?? null,
+      knownZone: user.knownZone,
     };
   }
 }

@@ -42,4 +42,6 @@ export interface Recommendation {
   estimatedSavingToday: { amount: number; cappedByBank: boolean } | null;
   /** true si no hay nada vigente hoy ni en los próximos 7 días. */
   nothingFound: boolean;
+  /** Monto que dijo el usuario que piensa gastar, si lo dijo — junto con estimatedSavingToday le permite al Response Generator decir cuánto terminaría pagando, no solo cuánto ahorra. */
+  spentAmount: number | null;
 }

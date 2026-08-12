@@ -71,29 +71,68 @@ describe('buildRecommendationFromSearch', () => {
     );
 
     expect(rec.betterSoon).toEqual({
-      option: expect.objectContaining({ bankName: 'OCA', discountPercentage: 40 }),
+      option: expect.objectContaining({
+        bankName: 'OCA',
+        discountPercentage: 40,
+      }),
       daysFromNow: 1,
     });
   });
 
   it('only carries a $ estimate when the backend actually computed one from a real amount', () => {
     const withAmount = buildRecommendationFromSearch(
-      resolved({ today: PROMO, estimatedSaving: { amount: 800, discountPercentage: 20, cappedByBank: false } }),
+      resolved({
+        today: PROMO,
+        estimatedSaving: {
+          amount: 800,
+          discountPercentage: 20,
+          cappedByBank: false,
+        },
+      }),
       null,
     );
-    const withoutAmount = buildRecommendationFromSearch(resolved({ today: PROMO }), null);
+    const withoutAmount = buildRecommendationFromSearch(
+      resolved({ today: PROMO }),
+      null,
+    );
 
-    expect(withAmount.estimatedSavingToday).toEqual({ amount: 800, cappedByBank: false });
+    expect(withAmount.estimatedSavingToday).toEqual({
+      amount: 800,
+      cappedByBank: false,
+    });
     expect(withoutAmount.estimatedSavingToday).toBeNull();
   });
 
   it('marks nothingFound only when both today and better are absent', () => {
-    expect(buildRecommendationFromSearch(resolved({}), null).nothingFound).toBe(true);
-    expect(buildRecommendationFromSearch(resolved({ today: PROMO }), null).nothingFound).toBe(false);
+    expect(buildRecommendationFromSearch(resolved({}), null).nothingFound).toBe(
+      true,
+    );
+    expect(
+      buildRecommendationFromSearch(resolved({ today: PROMO }), null)
+        .nothingFound,
+    ).toBe(false);
+  });
+
+  it('carries the spent amount through when a follow-up message provided one', () => {
+    const withAmount = buildRecommendationFromSearch(
+      resolved({ today: PROMO }),
+      null,
+      600,
+    );
+    const withoutAmount = buildRecommendationFromSearch(
+      resolved({ today: PROMO }),
+      null,
+    );
+
+    expect(withAmount.spentAmount).toBe(600);
+    expect(withoutAmount.spentAmount).toBeNull();
   });
 
   it('passes the zone through as informational context, without touching bestToday', () => {
-    const rec = buildRecommendationFromSearch(resolved({ today: PROMO }), 'Pocitos');
+    const rec = buildRecommendationFromSearch(
+      resolved({ today: PROMO }),
+      'Pocitos',
+    );
     expect(rec.zone).toBe('Pocitos');
     expect(rec.bestToday?.neighborhood).toBeNull();
   });

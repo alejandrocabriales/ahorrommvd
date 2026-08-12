@@ -8,6 +8,8 @@ describe('ResolveUserUseCase', () => {
           id: 'user-1',
           banks: [{ name: 'Itaú' }, { name: 'Santander' }],
           pendingQuery: null,
+          conversationContext: null,
+          knownZone: null,
         }),
       },
     };
@@ -23,6 +25,8 @@ describe('ResolveUserUseCase', () => {
       id: 'user-1',
       bankNames: ['Itaú', 'Santander'],
       pendingQuery: null,
+      conversationContext: null,
+      knownZone: null,
     });
   });
 
@@ -40,6 +44,8 @@ describe('ResolveUserUseCase', () => {
           id: 'user-1',
           banks: [],
           pendingQuery,
+          conversationContext: null,
+          knownZone: null,
         }),
       },
     };
@@ -48,6 +54,38 @@ describe('ResolveUserUseCase', () => {
     const result = await useCase.execute('598');
 
     expect(result?.pendingQuery).toEqual(pendingQuery);
+  });
+
+  it('surfaces the conversation context and known zone when present', async () => {
+    const conversationContext = {
+      query: {
+        merchantName: null,
+        branchHint: null,
+        categoryName: 'Farmacias',
+        zone: null,
+        amount: null,
+        wantsGeneralSavings: false,
+      },
+      recommendation: { queryLabel: 'Farmacias' },
+      updatedAt: '2026-08-12T12:00:00.000Z',
+    };
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          banks: [],
+          pendingQuery: null,
+          conversationContext,
+          knownZone: 'Pocitos',
+        }),
+      },
+    };
+    const useCase = new ResolveUserUseCase(prisma as never);
+
+    const result = await useCase.execute('598');
+
+    expect(result?.conversationContext).toEqual(conversationContext);
+    expect(result?.knownZone).toBe('Pocitos');
   });
 
   it('returns null without creating anything when the user has never been seen before', async () => {

@@ -55,7 +55,11 @@ export function computePromotionComparison<T extends PromotionSummary>(
   promotions: T[],
   today: Date,
   allowedBankNames?: Set<string> | null,
-): { today: T | null; better: { promotion: T; daysFromNow: number } | null; upcoming: T[] } {
+): {
+  today: T | null;
+  better: { promotion: T; daysFromNow: number } | null;
+  upcoming: T[];
+} {
   const candidates = allowedBankNames
     ? promotions.filter((p) => allowedBankNames.has(p.bankName))
     : promotions;

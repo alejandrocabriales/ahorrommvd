@@ -123,6 +123,18 @@ model User {
   // conteste "¿qué tarjetas tenés?" — se resuelve y se borra en el próximo
   // mensaje. Shape: PendingQuery (src/domain/users/pending-query.ts).
   pendingQuery    Json?       @map("pending_query")
+  // De qué veníamos hablando (última consulta + recomendación resuelta) —
+  // memoria de corto plazo, ~30 min, para que "600 pesos" o "y en Pocitos?"
+  // no arranquen de cero. Shape: ConversationContext
+  // (src/domain/users/conversation-context.ts). A diferencia de
+  // pendingQuery, esto NO se borra al resolver un mensaje: se sobreescribe
+  // con la consulta más reciente cada vez que hay algo real que recordar.
+  conversationContext Json?   @map("conversation_context")
+  // Barrio que el usuario mencionó alguna vez — a diferencia de
+  // conversationContext, no vence a los 30 min: es el default de "dónde
+  // está" mientras no diga uno nuevo. Solo informativo (spec: no hay
+  // coordenadas cargadas, nunca filtra resultados por cercanía real).
+  knownZone           String? @map("known_zone")
 
   @@map("users")
 }

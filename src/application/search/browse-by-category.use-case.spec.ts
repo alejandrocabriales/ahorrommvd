@@ -15,7 +15,12 @@ interface FakePromoRow {
   sourceUrl: string;
 }
 
-function row(overrides: Partial<FakePromoRow> & { merchantChainId: string; merchantChainName: string }): FakePromoRow {
+function row(
+  overrides: Partial<FakePromoRow> & {
+    merchantChainId: string;
+    merchantChainName: string;
+  },
+): FakePromoRow {
   const today = new Date();
   return {
     bank: { name: 'Itaú' },
@@ -38,11 +43,36 @@ function buildPrisma(rows: FakePromoRow[]) {
 describe('BrowseByCategoryUseCase', () => {
   it('picks the highest % active today as bestToday, and up to 3 others as alternatives', async () => {
     const prisma = buildPrisma([
-      row({ merchantChainId: 'c1', merchantChainName: 'Farmashop', discountPercentage: 25, bank: { name: 'Itaú' } }),
-      row({ merchantChainId: 'c2', merchantChainName: 'San Roque', discountPercentage: 15, bank: { name: 'Santander' } }),
-      row({ merchantChainId: 'c3', merchantChainName: 'Vidal', discountPercentage: 10, bank: { name: 'OCA' } }),
-      row({ merchantChainId: 'c4', merchantChainName: 'Nix', discountPercentage: 5, bank: { name: 'Itaú' } }),
-      row({ merchantChainId: 'c5', merchantChainName: 'Sarandí', discountPercentage: 2, bank: { name: 'Itaú' } }),
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 25,
+        bank: { name: 'Itaú' },
+      }),
+      row({
+        merchantChainId: 'c2',
+        merchantChainName: 'San Roque',
+        discountPercentage: 15,
+        bank: { name: 'Santander' },
+      }),
+      row({
+        merchantChainId: 'c3',
+        merchantChainName: 'Vidal',
+        discountPercentage: 10,
+        bank: { name: 'OCA' },
+      }),
+      row({
+        merchantChainId: 'c4',
+        merchantChainName: 'Nix',
+        discountPercentage: 5,
+        bank: { name: 'Itaú' },
+      }),
+      row({
+        merchantChainId: 'c5',
+        merchantChainName: 'Sarandí',
+        discountPercentage: 2,
+        bank: { name: 'Itaú' },
+      }),
     ]);
     const useCase = new BrowseByCategoryUseCase(prisma as never);
 
@@ -64,9 +94,21 @@ describe('BrowseByCategoryUseCase', () => {
 
   it('keeps only the best promo per chain (no duplicate chain in bestToday/alternatives)', async () => {
     const prisma = buildPrisma([
-      row({ merchantChainId: 'c1', merchantChainName: 'Farmashop', discountPercentage: 10 }),
-      row({ merchantChainId: 'c1', merchantChainName: 'Farmashop', discountPercentage: 25 }), // mismo chain, mejor %
-      row({ merchantChainId: 'c2', merchantChainName: 'San Roque', discountPercentage: 15 }),
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 10,
+      }),
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 25,
+      }), // mismo chain, mejor %
+      row({
+        merchantChainId: 'c2',
+        merchantChainName: 'San Roque',
+        discountPercentage: 15,
+      }),
     ]);
     const useCase = new BrowseByCategoryUseCase(prisma as never);
 
@@ -81,7 +123,11 @@ describe('BrowseByCategoryUseCase', () => {
   it('sets betterSoon when a future day beats today, with the right daysFromNow', async () => {
     const today = new Date();
     const prisma = buildPrisma([
-      row({ merchantChainId: 'c1', merchantChainName: 'Farmashop', discountPercentage: 15 }),
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 15,
+      }),
       row({
         merchantChainId: 'c2',
         merchantChainName: 'San Roque',
@@ -107,7 +153,11 @@ describe('BrowseByCategoryUseCase', () => {
   it('leaves betterSoon null when nothing upcoming beats today (no false "conviene esperar")', async () => {
     const today = new Date();
     const prisma = buildPrisma([
-      row({ merchantChainId: 'c1', merchantChainName: 'Farmashop', discountPercentage: 40 }),
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 40,
+      }),
       row({
         merchantChainId: 'c2',
         merchantChainName: 'San Roque',
@@ -136,8 +186,16 @@ describe('BrowseByCategoryUseCase', () => {
 
   it('searches across all categories when categoryName is null (ej. "quiero ahorrar hoy")', async () => {
     const prisma = buildPrisma([
-      row({ merchantChainId: 'c1', merchantChainName: 'Farmashop', discountPercentage: 15 }),
-      row({ merchantChainId: 'c2', merchantChainName: 'Ta-Ta', discountPercentage: 20 }),
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 15,
+      }),
+      row({
+        merchantChainId: 'c2',
+        merchantChainName: 'Ta-Ta',
+        discountPercentage: 20,
+      }),
     ]);
     const useCase = new BrowseByCategoryUseCase(prisma as never);
 
@@ -145,16 +203,61 @@ describe('BrowseByCategoryUseCase', () => {
 
     expect(prisma.promotion.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.not.objectContaining({ merchantChain: expect.anything() }),
+        where: expect.not.objectContaining({
+          merchantChain: expect.anything(),
+        }),
       }),
     );
-    expect(rec.bestToday).toMatchObject({ merchantChainName: 'Ta-Ta', discountPercentage: 20 });
+    expect(rec.bestToday).toMatchObject({
+      merchantChainName: 'Ta-Ta',
+      discountPercentage: 20,
+    });
     expect(rec.queryLabel).toBe('lo mejor de hoy en Montevideo');
+  });
+
+  it('computes estimatedSavingToday against bestToday when an amount comes from a follow-up message', async () => {
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 15,
+        bank: { name: 'Itaú' },
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(prisma as never);
+
+    const rec = await useCase.execute('Farmacias', null, undefined, 600);
+
+    expect(rec.estimatedSavingToday).toEqual({
+      amount: 90,
+      cappedByBank: false,
+    });
+    expect(rec.spentAmount).toBe(600);
+  });
+
+  it('leaves estimatedSavingToday/spentAmount null when no amount was given', async () => {
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 15,
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(prisma as never);
+
+    const rec = await useCase.execute('Farmacias', null, undefined);
+
+    expect(rec.estimatedSavingToday).toBeNull();
+    expect(rec.spentAmount).toBeNull();
   });
 
   it('passes the query label and zone through untouched (zone is informational, never a proximity filter)', async () => {
     const prisma = buildPrisma([
-      row({ merchantChainId: 'c1', merchantChainName: 'Farmashop', discountPercentage: 10 }),
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 10,
+      }),
     ]);
     const useCase = new BrowseByCategoryUseCase(prisma as never);
 

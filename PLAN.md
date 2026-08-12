@@ -434,6 +434,77 @@ proyecto de datos aparte, no de esta capa conversacional.
 producción (`DATABASE_URL="<public-url>" npx prisma migrate deploy`) —
 hechas y probadas en local, todavía no corridas contra la base de Railway.
 
+### 🟩 Post-launch — memoria conversacional de corto plazo + ubicación por defecto (12/08/2026)
+
+Pedido explícito del usuario en su rol de Head of Product: el bot se sentía
+"buscador de descuentos" porque perdía el hilo apenas el usuario contestaba
+algo corto ("capaz gasto 600 pesos" después de preguntar por farmacias
+tiraba "no entendí bien qué buscás"). Sin cambios de arquitectura/stack —
+todo dentro de las mismas 3 capas (Intent Parser / Recommendation Engine /
+Response Generator) ya documentadas arriba.
+
+**`ConversationContext`** (`src/domain/users/conversation-context.ts`,
+columna nueva `users.conversation_context` Json, migración
+`conversation_context_known_zone`): guarda la última consulta resuelta +
+su `Recommendation` completa, con un TTL de 30 minutos
+(`isContextFresh`). Se sobreescribe cada vez que hay una `Recommendation`
+real que recordar — a diferencia de `pendingQuery`, no se borra al
+contestar.
+
+**`mergeWithContext`** (puro, sin IA — `src/application/users/`): un
+mensaje de seguimiento sin comercio/categoría propios ("600 pesos", "y en
+Pocitos?") completa los campos que faltan con el contexto fresco. Un
+barrio nuevo se lee como sucursal si veníamos de un comercio puntual, o
+como zona informativa si veníamos de una categoría (`refinesBranch`).
+
+**`ParsedIntent` +2 campos**: `confirmsRecommendation` ("me sirve", "dale",
+"voy ahora") y `prefersToWait` ("mañana entonces", "mejor espero") — el
+Intent Parser los clasifica sin necesitar el contexto él mismo; es la capa
+de aplicación la que decide qué hacer con eso.
+
+**`buildContextualShortReply`** (puro, determinístico, sin IA): cuando el
+contexto fresco alcanza para confirmar o para decir "esperar conviene",
+responde con un template armado con datos ya reales — mismo criterio que
+`CANT_UNDERSTAND_MESSAGE`/`NOT_FOUND_MESSAGE` ya usaban, ahora aplicado
+también acá. Si no hay suficiente data (ej. pidió esperar pero no había un
+`betterSoon` guardado), devuelve `null` y el flujo normal sigue de largo
+en vez de inventar algo.
+
+**`BrowseByCategoryUseCase` + monto**: ahora acepta un `amount` opcional y
+calcula `estimatedSavingToday` igual que ya hacía el flujo de comercio
+puntual — es lo que permite que "600 pesos" después de "farmacias" calcule
+un ahorro real, no solo repita el %. `Recommendation.spentAmount` es
+nuevo: junto con `estimatedSavingToday`, el Response Generator ahora puede
+decir cuánto terminarías pagando, no solo cuánto ahorrás.
+
+**Barrio solo, sin comercio ni categoría** (ej. "Pocitos" a secas): antes
+cortocircuitaba en "no entendí" (ningún campo de `ParsedIntent` distinto de
+`zone` se llenaba). Ahora se trata como "quiero ahorrar hoy" con el barrio
+pegado de forma informativa.
+
+**`knownZone`** (columna nueva en `users`, sin TTL): el barrio que el
+usuario mencionó alguna vez queda de default para consultas futuras que no
+traigan uno — nunca alcanza por sí solo para inventar un tema en un mensaje
+sin nada más (ver el chequeo `hasTopic` en
+`HandleWhatsAppMessageUseCase`, agregado justamente para que un "hola" con
+barrio conocido no dispare una recomendación que nadie pidió).
+
+Validado con 132 tests unitarios (antes: 100) más una verificación en vivo
+contra Postgres real de los 3 ejemplos que quedaron documentados en
+`responses.md` con números reales (no inventados): "farmacias" → "600
+pesos" → "voy ahora" (3 turnos, memoria + cálculo + confirmación
+determinística), "y en Pocitos?" después de una categoría, y "mejor espero"
+en restaurantes usando el `betterSoon` ya guardado. De paso, revisando
+`responses.md` contra el código real se encontraron y corrigieron 3
+ejemplos ya desactualizados (el bestToday de "supermercados"/"quiero
+ahorrar hoy" no era el que el código realmente calcula hoy, porque las
+promos branch-specific de Ta-Ta no cuentan a nivel categoría — solo las de
+cadena completa).
+
+Detalle completo, con "qué debe estudiar el desarrollador" para cada
+concepto de IA nuevo (salida estructurada, memoria fuera del contexto del
+modelo, cuándo NO usar IA, `temperature` por tarea), en `responses.md`.
+
 ## Criterio de éxito del MVP
 
 Usuario manda "Ta-Ta Pocitos" por WhatsApp → responde en <2s con
