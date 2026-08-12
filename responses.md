@@ -283,6 +283,76 @@ justo veníamos del súper, donde hoy ya es lo mejor de la semana),
 que confirmar — y el flujo normal sigue de largo (misma respuesta de
 "supermercados" de nuevo, sin inventar una espera que no existe).
 
+Nota: `"y mañana?"` (pregunta explícita, no una decisión ya tomada) usa el
+mismo `prefersToWait` — el mismo template de arriba ya contesta la
+pregunta Y empuja la decisión, consistente con "no responder preguntas,
+resolver decisiones" (sección 3 de `VISION.md`).
+
+### "mejor espero" con monto ya conocido **[real, determinístico]**
+
+Si el turno 2 hubiera sido con monto (ej. `farmacias` → `600 pesos` →
+`mejor espero`), `betterSoon.estimatedSaving` ya viene calculado y el
+template compara $ directo en vez de ofrecer calcularlo:
+
+> Dale, esperar conviene: en 3 días Farmashop tiene 25% con Santander —
+> unos $150 de ahorro (contra el 15% de hoy).
+
+Y si esa mejora futura tuviera tope, lo dice explícito (`(tope de la
+promo)`) — mismo criterio que el Response Generator con IA, ver "Qué debe
+estudiar el desarrollador" #6 más abajo.
+
+---
+
+## Consultas de ubicación (¿dónde queda?)
+
+Bug real reportado en producción (12/08/2026): un usuario preguntó por
+farmacias, el bot recomendó "Chajá", y `"Chajá donde esta?"` respondió
+**"No entendí bien qué buscás"** — el Intent Parser no extraía nada de una
+pregunta de ubicación. Se agregó `asksLocation` (booleano nuevo del Intent
+Parser) y se conectó `Branch.address` — que ya existía en la base para
+algunas sucursales pero nunca llegaba hasta el Response Generator, ni
+siquiera para responder "¿dónde está?" — hasta el `Recommendation` que
+arma la IA.
+
+### "Ta-Ta Pocitos donde esta?" **[real]**
+
+Turno 1: `Ta-Ta Pocitos` (comercio con sucursal puntual, tiene dirección
+cargada en el seed). Turno 2, la pregunta que rompía antes:
+
+> Hoy te conviene ir al Ta-Ta de Pocitos, en Av. Brasil 2846. Si pagás con
+> la tarjeta de crédito Itaú Mastercard, tenés un 10% de descuento. Si
+> querés que te calcule cuánto ahorrarías, decime cuánto pensás gastar.
+
+Nota: la dirección aparece incluso sin preguntar explícitamente por ella
+(turno 1 ya la menciona) — es un dato más del comercio, no algo que se
+esconde hasta que se pregunta. `asksLocation: true` lo que hace es
+**priorizar** esa parte de la respuesta cuando la pregunta es
+específicamente sobre ubicación.
+
+### "Chajá donde esta?" sin dirección cargada **[hipotético — hoy en dev solo Ta-Ta/Devoto/Farmashop/McDonald's tienen sucursales con dirección]**
+
+Cuando no tenemos `address` para esa sucursal (la gran mayoría de las 132
+cadenas — ver "NO promete" abajo), el Response Generator no inventa una
+ni ignora la pregunta:
+
+> Hoy te conviene ir a Chajá y pagar con la tarjeta de crédito Itaú Visa
+> para aprovechar un 15% de descuento. No tengo la dirección exacta de
+> Chajá cargada, pero podés buscar el local más cercano. Si querés, decime
+> cuánto pensás gastar y te calculo el ahorro en pesos.
+
+### "y en Pocitos?" — mención de zona ahora obligatoria, no opcional **[real]**
+
+Antes la regla decía "podés mencionar la zona" — el modelo, probado en
+vivo, elegía omitirla la mayoría de las veces (se sentía como si hubiera
+ignorado la pregunta). Ahora es una instrucción firme. Mismo caso de la
+sección "Seguimiento conversacional" arriba, verificado de nuevo:
+
+> Hoy te conviene ir a Farmashop y pagar con la tarjeta de crédito Itaú
+> Visa para aprovechar un 15% de descuento. En Pocitos no tengo una
+> sucursal específica cargada, pero esta promo aplica en cualquier local
+> de Farmashop. Si querés, decime cuánto pensás gastar y te calculo el
+> ahorro exacto.
+
 ---
 
 ## Casos límite ya cubiertos por el flujo (no específicos del Response Generator)
@@ -314,6 +384,13 @@ que confirmar — y el flujo normal sigue de largo (misma respuesta de
 - **"Sucursal más cercana" real**: requiere lat/long en `branches`, que hoy
   no existe para ninguna fila. Es un proyecto de datos (backfill de
   direcciones), no de este Response Generator.
+- **Dirección para la mayoría de los comercios**: `Branch.address` ya se
+  usa cuando existe (12/08/2026), pero solo las 4 cadenas del seed
+  original (Ta-Ta, Devoto, Farmashop, McDonald's) tienen sucursales con
+  dirección cargada — las 128 cadenas auto-descubiertas por los scrapers
+  no tienen ni una sola sucursal en la base (mismo gap documentado arriba
+  para GPS). Para esas, el bot es honesto ("no tengo la dirección
+  cargada"), no inventa una.
 - **Recordatorios reales** ("avisame cuando arranque McDonald's"): el bot
   puede *decir* que va a avisar en una respuesta redactada por IA, pero no
   hay ningún cron/job que efectivamente mande ese mensaje después — es una
@@ -424,3 +501,198 @@ distintas — rompe la confiabilidad de todo lo que se construyó encima
 **Documentación oficial de OpenAI para profundizar**:
 - Referencia del parámetro `temperature` en la API de Chat Completions:
   https://platform.openai.com/docs/api-reference/chat/create
+
+### 5. System instructions — personalidad y voseo sin caricatura (12/08/2026)
+
+Desde acá en adelante, cada entrada de esta sección sigue el formato de 7
+puntos que pidió el usuario en `VISION.md` §17 (más detallado que las 4
+entradas de arriba, que quedan como están).
+
+**1. Qué concepto de IA se usó**: *system instructions* (el mensaje
+`role: 'system'` que va antes de cada mensaje de usuario) — específicamente
+la parte de prompt engineering que define **persona y registro de voz**,
+no solo qué información incluir.
+
+**2. Por qué lo usamos**: el bug de fondo no era técnico — el Response
+Generator ya redactaba bien, pero sin reglas explícitas de estilo el
+modelo cae por default a una voz genérica de "asistente" (formal, con
+frases como "con gusto puedo ayudarte") o, si se le pide "español
+rioplatense" sin más detalle, puede sobrecorregir hacia modismos de
+manual ("che", "bo") que en Uruguay real nadie usa así de seguido — spec
+explícito del usuario en `VISION.md` §10: "no queremos caricaturizar el
+habla uruguaya".
+
+**3. Cómo funciona conceptualmente**: el modelo no "sabe" cómo hablás vos
+ni tu público — infiere el registro de dos lugares: (a) los patrones
+estadísticos de su entrenamiento (que para "español uruguayo" incluye
+mucho texto que SÍ caricaturiza, tipo diálogo de ficción), y (b) las
+instrucciones explícitas que le des en el system prompt. Cuanto más
+específico el prompt (qué palabras evitar, qué frases preferir, qué
+comparación evitar — "no suenes argentino"), menos margen le das a que
+rellene el hueco con el patrón genérico/estereotipado.
+
+**4. Cómo se usa en AhorroMVD**: `OpenRouterResponseGenerator.SYSTEM_PROMPT`
+(`src/infrastructure/ai/openrouter-response-generator.service.ts`), sección
+"Estilo" — lista concreta de voseo esperado (tenés, podés, decime...),
+lista de palabras/modismos prohibidos (bo, che, salado, guita, gurí...),
+instrucción explícita de no sonar argentino, y frases de apertura
+formales prohibidas ("Estimado usuario") con alternativas preferidas
+sugeridas. Es puro cambio de prompt — no toca el `Recommendation` que
+recibe ni la estructura de la respuesta (mejor opción / alternativas /
+conviene esperar / siguiente paso), solo CÓMO se redacta.
+
+**5. Documentación oficial de OpenAI**: Prompt engineering guide —
+https://platform.openai.com/docs/guides/prompt-engineering
+
+**6. Qué parte es relevante para esto puntual**: la sección de esa guía
+sobre darle al modelo un rol/persona claro y ejemplos de tono (few-shot
+implícito vía instrucciones, no ejemplos completos) — es la misma técnica
+que ya usa el prompt del Intent Parser para acotar categorías/bancos a una
+lista cerrada, aplicada acá a "qué suena bien" en vez de "qué es válido".
+
+**7. Qué podrías modificar vos para practicar**: agregá 2-3 frases
+prohibidas o preferidas más que se te ocurran escuchando cómo habla la
+gente real en Montevideo (no lo que "suena uruguayo" en la tele), corré
+`npm run ai:test:response` antes y después del cambio y compará el % de
+checks correctos — ese script nació DESPUÉS de esta entrada (ver #7 más
+abajo), así que ya no hace falta comparar respuestas a mano.
+
+### 6. Aritmética fuera del modelo — el LLM nunca calcula, solo explica (12/08/2026)
+
+**1. Qué concepto de IA se usó**: *grounding* — darle al modelo el número
+YA calculado en vez de pedirle que lo calcule él. Los LLM son
+notoriamente poco confiables haciendo cuentas exactas (multiplican
+tokens, no números) — cuanta más aritmética le pedís "de memoria", más
+chance de que invente un resultado que suena razonable pero está mal.
+
+**2. Por qué lo usamos**: se encontró en vivo probando esta misma vuelta.
+Ta-Ta con 40% de descuento y tope de $800 sobre $4.000: el prompt
+anterior solo mandaba `estimatedSavingToday: {amount: 800,
+cappedByBank: true}` sin explicar la regla de qué hacer con
+`cappedByBank`, y el modelo redactó *"tenés un 40% de descuento, lo que
+significa que de $4.000, ahorrás $800"* — matemáticamente confuso (40%
+de $4.000 son $1.600, no $800) porque nunca mencionó que había un tope
+de por medio. El dato correcto ya estaba en el JSON; lo que faltaba era
+la regla de CÓMO explicarlo.
+
+**3. Cómo funciona conceptualmente**: es la misma idea de fondo que ya
+regía todo el proyecto ("La IA NO debe inventar promociones") aplicada
+a números en vez de a datos — el backend (`computeEstimatedSaving`,
+determinístico, con test unitario) calcula el monto real considerando
+el tope, y al modelo solo se le pide que lo REDACTE bien, nunca que lo
+derive. Cuando el modelo tiene el resultado final servido, la única
+forma de "arruinarlo" es explicándolo mal en palabras — un riesgo mucho
+más chico que pedirle que multiplique porcentajes.
+
+**4. Cómo se usa en AhorroMVD**: `Recommendation.betterSoon.estimatedSaving`
+es nuevo — antes solo `estimatedSavingToday` existía, así que "conviene
+esperar" nunca podía comparar $ hoy contra $ mañana, solo %. Ahora
+`BrowseByCategoryUseCase` y `buildRecommendationFromSearch` calculan el
+ahorro esperando con el mismo `computeEstimatedSaving` (respeta el
+`capAmount` de esa promo específica). El `SYSTEM_PROMPT` del Response
+Generator tiene una regla nueva de "Topes" explícita: cuando
+`cappedByBank` es true, decir el % teórico Y el ahorro real, nunca solo
+uno de los dos. Mismo tratamiento en el camino determinístico
+(`buildContextualShortReply`, sin IA) para "voy ahora"/"mejor espero".
+
+**5. Documentación oficial de OpenAI**: no hay una guía específica de
+"la IA no sabe sumar" — lo más cercano es la de function calling/tools
+(cuando el cálculo es más complejo que esto, la práctica recomendada es
+delegarlo a una tool/función real, no confiar en que el modelo lo
+razone en texto):
+https://platform.openai.com/docs/guides/function-calling
+
+**6. Qué parte es relevante para esto puntual**: la idea de "tool
+calling" ahí es justamente devolverle control al código para operaciones
+que el modelo no debería intentar solo — acá no llegamos a necesitar una
+tool real porque el cálculo ya lo hacíamos ANTES de llamar al modelo
+(arquitectura de 3 capas: Recommendation Engine calcula, Response
+Generator redacta), pero es el mismo principio con un paso menos.
+
+**7. Qué podrías modificar vos para practicar**: agregale a
+`computeEstimatedSaving` (`src/application/search/search-message.ts`) un
+caso con un `capAmount` de $0 o negativo (dato corrupto) y confirmá que
+no rompe ni el cálculo ni el texto — después probá sacar la regla de
+"Topes" del prompt a propósito y compará cómo redacta el mismo caso sin
+la regla, para ver el efecto real de esa sola frase.
+
+**Verificado en vivo** (2 casos, contra el modelo real): "Ta-Ta $4.000 al
+40% con tope $800" ahora dice *"el descuento en teoría sería de $1.600
+sobre $4.000, tu ahorro real es de $800"* — correcto. Un segundo caso más
+sutil (hoy 20% sin tope = $800, mañana 40% con tope = $800 real) el
+modelo notó solo, sin que se lo pidiéramos explícitamente, que esperar
+NO mejora el ahorro en pesos aunque el % suba, porque ambos terminan
+topeados igual — señal de que la regla nueva realmente se está usando
+para razonar, no solo repitiendo un template.
+
+### 7. Eval de redacción + robustez de extracción con preguntas fuera del patrón (12/08/2026)
+
+**1. Qué concepto de IA se usó**: dos cosas relacionadas. (a) *Eval
+harness* para texto libre — `response-eval.script.ts`, mismo espíritu que
+`nlu-eval.script.ts` pero en vez de comparar campos JSON exactos, corre
+*checks* (funciones que devuelven true/false) contra el texto redactado:
+"¿menciona el barrio?", "¿dice el monto correcto?", "¿evita frases de
+robot?". (b) *Robustez de extracción fuera de los ejemplos dados* — un
+LLM con extracción estructurada tiende a anclarse fuerte en los ejemplos
+del prompt; una frase con una forma gramatical distinta a todos los
+ejemplos (una pregunta de ubicación, cuando todos los ejemplos eran
+pedidos de compra) puede fallar en producción aunque la regla "debería"
+cubrirla en teoría.
+
+**2. Por qué lo usamos**: un bug real en producción — `"Chajá donde
+esta?"` devolvía TODOS los campos en null (ni siquiera `merchantName`,
+que la regla ya decía que debía extraerse "si menciona un comercio").
+Ninguno de los ~20 ejemplos del prompt tenía la forma "¿[comercio] dónde
+está?" — todos eran "necesito ir a X", "X 4000", etc. Agregar UN ejemplo
+explícito de esa forma gramatical (y una frase aclarando "extraelo
+SIEMPRE, incluso en preguntas de ubicación") lo arregló — confirmado con
+`npm run ai:test`, 28/29 antes de la vuelta anterior, ahora con los casos
+nuevos de `asksLocation` incluidos.
+
+**3. Cómo funciona conceptualmente**: los "ejemplos" en un system prompt
+no son solo documentación para un humano — son few-shot implícito, y el
+modelo generaliza mejor CERCA de la forma de esos ejemplos que lejos. Una
+regla escrita en prosa ("extraé el comercio si lo menciona") compite con
+el patrón estadístico de los ejemplos concretos que sí viste. Por eso
+"cubrir la regla en teoría" no es lo mismo que "cubrirla en la práctica"
+— hay que probar con mensajes que se alejan de la forma de los ejemplos
+existentes, no solo variaciones cercanas.
+
+**4. Cómo se usa en AhorroMVD**: `openrouter-message-interpreter.service.ts`
+tiene ahora un ejemplo explícito de pregunta de ubicación en la regla de
+`merchantName`, más el campo `asksLocation` con su propio ejemplo.
+`response-eval.script.ts` (nuevo, `npm run ai:test:response`) corre 6
+casos contra el Response Generator real — incluye el caso del tope, el
+caso de la zona ignorada, y el caso de `asksLocation` con y sin
+`address` — para agarrar este tipo de regresión ANTES de que un usuario
+real la encuentre, no después.
+
+**5. Documentación oficial de OpenAI**: la guía de Structured Outputs
+(la misma de la entrada #1) tiene una sección sobre las limitaciones del
+enfoque — vale releerla con esto en mente:
+https://platform.openai.com/docs/guides/structured-outputs
+
+**6. Qué parte es relevante para esto puntual**: la advertencia de que
+`strict: true` garantiza la FORMA de la respuesta (siempre JSON válido
+con esos campos), nunca el CONTENIDO — un modelo "confundido" por una
+frase rara igual devuelve JSON perfecto, solo que con todo en null. La
+forma no falla nunca; el contenido sí, y eso solo se detecta probando
+con casos reales, no leyendo el schema.
+
+**7. Qué podrías modificar vos para practicar**: pensá en 3 formas
+gramaticales que el prompt actual probablemente no cubre bien (ej.
+"¿tiene delivery Ta-Ta?", "¿hasta qué hora abre Farmashop?", "che, ¿algo
+bueno en Pocitos?") y agregalas como casos a `nlu-eval.script.ts` ANTES
+de tocar el prompt — corré el eval, confirmá que fallan (o no), y recién
+ahí decidí si hace falta una regla nueva. Ese orden (escribir el caso que
+falla antes que el fix) es lo que evitó que este bug se colara nunca en
+un test, y es la misma disciplina que TDD aplicada a prompts.
+
+**Verificado en vivo**: `npm run ai:test` — 28/29 (97%), incluyendo los 3
+casos nuevos de `asksLocation` (todos OK). `npm run ai:test:response` —
+20/21 (95%); el único FAIL fue un caso de tope donde el modelo dio el
+monto correcto ($800) pero no explicó el "$900 teórico" — no
+determinístico (a temperature 0.4), el eval script queda para
+monitorear si se repite. Reproducido también el bug real de producción
+end-to-end contra la base seedeada ("Ta-Ta Pocitos donde esta?" → ahora
+responde con la dirección real, "Av. Brasil 2846").
