@@ -88,6 +88,7 @@ const DEFAULT_RECOMMENDATION: Recommendation = {
   nothingFound: false,
   spentAmount: null,
   asksLocation: false,
+  locationUnverified: false,
 };
 
 const DEFAULT_AI_REPLY = 'La mejor opción es Farmashop con Itaú, 15%.';

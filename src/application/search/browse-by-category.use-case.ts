@@ -187,6 +187,13 @@ export class BrowseByCategoryUseCase {
         : null,
       nothingFound: !comparison.today && !comparison.better,
       spentAmount: amount ?? null,
+      // bestToday puede venir del fallback sin verificar (ver comentario de
+      // "verified" arriba) — si es así, el Response Generator tiene que
+      // avisarlo en vez de recomendarlo con la misma confianza que una
+      // cadena confirmada en Montevideo.
+      locationUnverified: comparison.today
+        ? !comparison.today.hasVerifiedMontevideoBranch
+        : false,
       // Preguntar "dónde queda" solo tiene sentido para un comercio puntual
       // (Response Generator necesita un "address" concreto) — a nivel
       // categoría no hay un único lugar que señalar.

@@ -53,8 +53,17 @@ function row(
   };
 }
 
-function buildPrisma(rows: FakePromoRow[]) {
-  return { promotion: { findMany: jest.fn().mockResolvedValue(rows) } };
+function buildPrisma(rows: FakePromoRow[], userBankNames?: string[]) {
+  return {
+    promotion: { findMany: jest.fn().mockResolvedValue(rows) },
+    user: {
+      findUnique: jest.fn().mockResolvedValue(
+        userBankNames
+          ? { banks: userBankNames.map((name) => ({ name })) }
+          : null,
+      ),
+    },
+  };
 }
 
 /** default: no geocodifica nada (como si el zone no se pudiera resolver) — así los tests que no le importa la distancia no se ven afectados por el filtro nuevo. */
@@ -315,9 +324,10 @@ describe('BrowseByCategoryUseCase', () => {
 
     expect(rec.bestToday?.merchantChainName).toBe('La Pasiva Arocena');
     expect(rec.alternatives).toEqual([]);
+    expect(rec.locationUnverified).toBe(false);
   });
 
-  it('falls back to unverified candidates when nothing in the category has a verified branch yet (never show "nothing found" when there are real promos)', async () => {
+  it('falls back to unverified candidates when nothing in the category has a verified branch yet (never show "nothing found" when there are real promos), and flags the recommendation as unverified', async () => {
     const prisma = buildPrisma([
       row({
         merchantChainId: 'c1',
@@ -332,6 +342,45 @@ describe('BrowseByCategoryUseCase', () => {
 
     expect(rec.bestToday?.merchantChainName).toBe('Bardo');
     expect(rec.nothingFound).toBe(false);
+    expect(rec.locationUnverified).toBe(true);
+  });
+
+  it('flags locationUnverified even when the unverified chain wins for a real reason — nothing verified survives the bank filter (bug found live: Itaú+OCA user, Soho/Chajá the only Restaurantes promos for those banks)', async () => {
+    // La query real filtra por banco en el WHERE — acá simulamos lo que
+    // Postgres ya devolvería filtrado (Porto Vanila, Santander-only, ni
+    // siquiera llega): confirmamos el WHERE por separado más abajo.
+    const prisma = buildPrisma(
+      [
+        row({
+          merchantChainId: 'c1',
+          merchantChainName: 'Soho',
+          discountPercentage: 25,
+          bank: { name: 'Itaú' },
+          hasVerifiedBranch: false,
+        }),
+        row({
+          merchantChainId: 'c2',
+          merchantChainName: 'Chajá',
+          discountPercentage: 10,
+          bank: { name: 'OCA' },
+          hasVerifiedBranch: false,
+        }),
+      ],
+      ['Itaú', 'OCA'],
+    );
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
+
+    const rec = await useCase.execute('Restaurantes', 'Buceo', 'user-itau-oca');
+
+    expect(prisma.promotion.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          bank: { name: { in: ['Itaú', 'OCA'] } },
+        }),
+      }),
+    );
+    expect(rec.bestToday?.merchantChainName).toBe('Soho');
+    expect(rec.locationUnverified).toBe(true);
   });
 
   it('passes the query label and zone through untouched, and never invents a "neighborhood" without real branch data', async () => {

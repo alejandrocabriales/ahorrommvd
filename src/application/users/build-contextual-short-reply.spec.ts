@@ -79,6 +79,7 @@ const BASE: Recommendation = {
   nothingFound: false,
   spentAmount: null,
   asksLocation: false,
+  locationUnverified: false,
 };
 
 describe('buildContextualShortReply', () => {

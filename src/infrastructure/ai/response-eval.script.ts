@@ -29,6 +29,7 @@ function recommendation(overrides: Partial<Recommendation>): Recommendation {
     nothingFound: false,
     spentAmount: null,
     asksLocation: false,
+    locationUnverified: false,
     ...overrides,
   };
 }
@@ -179,6 +180,30 @@ const CASES: EvalCase[] = [
         },
       },
       isConcise(35),
+      noBannedWords(),
+      noRobotPhrases(),
+    ],
+  },
+  {
+    label: 'locationUnverified -> debe avisar que no está confirmado en Montevideo, no recomendar con confianza plena (bug real: Soho/Punta del Este recomendado a un usuario de Barrio Sur)',
+    recommendation: recommendation({
+      zone: 'Barrio Sur',
+      bestToday: { ...FARMASHOP, merchantChainName: 'Soho', bankName: 'Itaú', discountPercentage: 25 },
+      locationUnverified: true,
+    }),
+    checks: [
+      {
+        name: 'avisa que no está confirmado en Montevideo',
+        predicate: (t) => {
+          const lower = t.toLowerCase();
+          return (
+            lower.includes('no tengo confirmado') ||
+            lower.includes('no confirmo') ||
+            lower.includes('no puedo confirmar') ||
+            (lower.includes('montevideo') && lower.includes('no'))
+          );
+        },
+      },
       noBannedWords(),
       noRobotPhrases(),
     ],
