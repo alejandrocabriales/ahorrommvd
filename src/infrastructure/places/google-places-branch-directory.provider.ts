@@ -8,27 +8,19 @@ import {
 } from '../../domain/branches/branch-directory-provider.port';
 import { MvpCategoryName } from '../../domain/scraping/mvp-category';
 import { normalizeMerchantName } from '../../domain/scraping/normalize-merchant-name';
-
-const PLACES_SEARCH_URL = 'https://places.googleapis.com/v1/places:searchText';
-
-// Centro de Montevideo — sesga la búsqueda a la ciudad (Text Search igual
-// puede devolver algo fuera del radio si el match de texto es muy fuerte,
-// esto solo prioriza, no filtra duro — por eso además hace falta el filtro
-// duro de `isInMontevideo` más abajo).
-const MONTEVIDEO_BIAS = { latitude: -34.9011, longitude: -56.1645 };
-const MONTEVIDEO_BIAS_RADIUS_METERS = 20000;
-const MONTEVIDEO_ADMIN_AREA = 'Departamento de Montevideo';
+import {
+  isInMontevideo,
+  MONTEVIDEO_BIAS,
+  MONTEVIDEO_BIAS_RADIUS_METERS,
+  PLACES_SEARCH_URL,
+  PlacesAddressComponent,
+} from './montevideo-places';
 
 const NEIGHBORHOOD_TYPES = new Set([
   'neighborhood',
   'sublocality',
   'sublocality_level_1',
 ]);
-
-interface PlacesAddressComponent {
-  longText?: string;
-  types?: string[];
-}
 
 interface PlacesResult {
   displayName?: { text: string };
@@ -51,21 +43,6 @@ function extractNeighborhood(
     (c.types ?? []).some((t) => NEIGHBORHOOD_TYPES.has(t)),
   );
   return match?.longText ?? null;
-}
-
-/**
- * `locationBias` en el request es un sesgo blando: Text Search puede (y
- * probado en vivo, lo hace) devolver resultados en otros departamentos o
- * directamente otros países cuando el nombre de la cadena es genérico
- * ("Santo Café" matcheó una cafetería en Quito). `administrative_area_level_1`
- * es el único campo de `addressComponents` que confirma departamento real.
- */
-function isInMontevideo(components: PlacesAddressComponent[] = []): boolean {
-  return components.some(
-    (c) =>
-      (c.types ?? []).includes('administrative_area_level_1') &&
-      c.longText === MONTEVIDEO_ADMIN_AREA,
-  );
 }
 
 /**

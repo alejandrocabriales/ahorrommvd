@@ -14,6 +14,7 @@ import { buildRecommendationFromSearch } from '../search/build-recommendation-fr
 import { SearchUseCase } from '../search/search.use-case';
 import { ResolveUserUseCase } from '../users/resolve-user.use-case';
 import { SetUserBanksUseCase } from '../users/set-user-banks.use-case';
+import { SetUserCityUseCase } from '../users/set-user-city.use-case';
 import { SavePendingQueryUseCase } from '../users/save-pending-query.use-case';
 import { ClearPendingQueryUseCase } from '../users/clear-pending-query.use-case';
 import { SaveConversationContextUseCase } from '../users/save-conversation-context.use-case';
@@ -28,6 +29,9 @@ const NOT_FOUND_MESSAGE =
 const ASK_BANKS_MESSAGE =
   '¿Qué tarjetas tenés? Contame (ej. "tengo Itaú y Santander") o escribí ' +
   '"dame todas" para ver todas las ofertas sin filtrar.';
+const ASK_ZONE_MESSAGE =
+  '¿Por qué zona de Montevideo andás? Así te tiro algo cerca tuyo, no ' +
+  'una promo del otro lado de la ciudad.';
 const UNSUPPORTED_CATEGORY_MESSAGE =
   'Por ahora solo tengo cargados descuentos de Supermercados, Farmacias y ' +
   'Restaurantes. Para pedir otra categoría, entrá acá y escribinos a ' +
@@ -73,6 +77,7 @@ export class HandleWhatsAppMessageUseCase {
     private readonly registerSaving: RegisterSavingUseCase,
     private readonly resolveUser: ResolveUserUseCase,
     private readonly setUserBanks: SetUserBanksUseCase,
+    private readonly setUserCity: SetUserCityUseCase,
     private readonly savePendingQuery: SavePendingQueryUseCase,
     private readonly clearPendingQuery: ClearPendingQueryUseCase,
     private readonly saveConversationContext: SaveConversationContextUseCase,
@@ -95,6 +100,21 @@ export class HandleWhatsAppMessageUseCase {
           : null;
     }
 
+    // Igual que bancos: se guarda apenas se detecta, no depende de que este
+    // mensaje tenga un tema que responder ("vivo en Maldonado" solo, sin
+    // pedir nada más, igual queda guardado).
+    let cityConfirmation: string | null = null;
+    if (intent.city) {
+      const result = await this.setUserCity.execute(from, intent.city);
+      cityConfirmation = result
+        ? `Listo, guardé que estás en ${result.city}.`
+        : null;
+    }
+
+    const confirmation =
+      [bankConfirmation, cityConfirmation].filter(Boolean).join('\n\n') ||
+      null;
+
     const user = await this.resolveUser.execute(from);
     const hasKnownBanks = (user?.bankNames.length ?? 0) > 0;
     const context = user?.conversationContext ?? null;
@@ -111,7 +131,7 @@ export class HandleWhatsAppMessageUseCase {
       }
       await this.sender.sendTextMessage(
         from,
-        this.withBankConfirmation(bankConfirmation, UNSUPPORTED_CATEGORY_MESSAGE),
+        this.withConfirmations(confirmation, UNSUPPORTED_CATEGORY_MESSAGE),
       );
       return;
     }
@@ -131,21 +151,29 @@ export class HandleWhatsAppMessageUseCase {
       });
       await this.sender.sendTextMessage(
         from,
-        this.withBankConfirmation(bankConfirmation, shortReply),
+        this.withConfirmations(confirmation, shortReply),
       );
       return;
     }
 
     // Un mensaje "puro" de respuesta (sin comercio/categoría propios) que
-    // trae bancos o pide "todas" contesta la pregunta pendiente, si había.
+    // trae bancos, pide "todas", o solo un barrio (respuesta a
+    // ASK_ZONE_MESSAGE, ej. "Pocitos") contesta la pregunta pendiente, si
+    // había.
     const isAnswerToPending =
       !intent.merchantName &&
       !intent.categoryName &&
-      (intent.showAllBanks || (intent.banks?.length ?? 0) > 0);
+      (intent.showAllBanks ||
+        (intent.banks?.length ?? 0) > 0 ||
+        Boolean(intent.zone));
 
+    // Al restaurar el pending, el barrio de ESTE mensaje pisa el que tenía
+    // guardado (que es null — por eso se había preguntado) — si no, la
+    // respuesta a ASK_ZONE_MESSAGE se perdería y quedaría preguntando de
+    // nuevo en un loop.
     const rawEffectiveQuery: PendingQuery =
       isAnswerToPending && user?.pendingQuery
-        ? user.pendingQuery
+        ? { ...user.pendingQuery, zone: intent.zone ?? user.pendingQuery.zone }
         : mergeWithContext(intent, context, now);
 
     // Un barrio SOLO (sin comercio/categoría propios, ej. "Pocitos" a secas)
@@ -163,13 +191,43 @@ export class HandleWhatsAppMessageUseCase {
 
     // Ubicación contextual: si ya hay un tema real y ni el mensaje ni la
     // memoria de 30 min traen un barrio, usamos el conocido del usuario de
-    // default — no cambia el resultado (no hay filtro por cercanía real
-    // todavía), así que no vale la pena volver a preguntar. Nunca alcanza
-    // por sí solo para inventar un tema donde no lo hay.
+    // default (BrowseByCategoryUseCase sí filtra por distancia real desde
+    // acá — ver ZoneGeocoder). Nunca alcanza por sí solo para inventar un
+    // tema donde no lo hay.
     const effectiveQuery: PendingQuery = {
       ...rawEffectiveQuery,
       zone: rawEffectiveQuery.zone ?? (hasTopic ? (user?.knownZone ?? null) : null),
     };
+
+    // El usuario dijo alguna vez que está en otra ciudad (knownCity) y pide
+    // una categoría/lo mejor en general — ahí no hay nada real que
+    // recomendar todavía (el catálogo entero es de Montevideo), así que
+    // avisamos en vez de aplicar datos de Montevideo como si sirvieran ahí.
+    // Antes de banks/zone a propósito: no tiene sentido juntar más info
+    // para una consulta que de entrada no podemos responder. Un comercio
+    // puntual (merchantName) sigue andando igual — quizás preguntan por
+    // algo que sí conocemos, sea cual sea la ciudad.
+    const needsCityDecline =
+      Boolean(user?.knownCity) &&
+      !rawEffectiveQuery.merchantName &&
+      (Boolean(rawEffectiveQuery.categoryName) ||
+        rawEffectiveQuery.wantsGeneralSavings);
+
+    if (needsCityDecline) {
+      if (user?.pendingQuery) {
+        await this.clearPendingQuery.execute(from);
+      }
+      await this.sender.sendTextMessage(
+        from,
+        this.withConfirmations(
+          confirmation,
+          `Por ahora solo tengo datos reales de Montevideo — en ${user!.knownCity} ` +
+            'todavía no puedo confirmarte nada. Si me decís el nombre de un ' +
+            'comercio puntual lo busco igual.',
+        ),
+      );
+      return;
+    }
 
     const needsBankQuestion = hasTopic && !hasKnownBanks && !intent.showAllBanks;
 
@@ -187,7 +245,34 @@ export class HandleWhatsAppMessageUseCase {
       });
       await this.sender.sendTextMessage(
         from,
-        this.withBankConfirmation(bankConfirmation, ASK_BANKS_MESSAGE),
+        this.withConfirmations(confirmation, ASK_BANKS_MESSAGE),
+      );
+      return;
+    }
+
+    // Pidió una categoría puntual ("necesito una farmacia") y no sabemos ni
+    // el barrio del mensaje ni el knownZone guardado — sin eso
+    // BrowseByCategoryUseCase no tiene con qué filtrar por distancia real.
+    // Acotado a categoryName puntual (no a wantsGeneralSavings/zone-solo):
+    // "quiero ahorrar hoy" es a propósito una consulta amplia de toda
+    // Montevideo, no vale la pena la fricción de preguntar ahí.
+    const needsZoneQuestion =
+      Boolean(effectiveQuery.categoryName) &&
+      !effectiveQuery.merchantName &&
+      !effectiveQuery.zone;
+
+    if (needsZoneQuestion) {
+      await this.savePendingQuery.execute(from, {
+        merchantName: effectiveQuery.merchantName,
+        branchHint: effectiveQuery.branchHint,
+        categoryName: effectiveQuery.categoryName,
+        zone: effectiveQuery.zone,
+        amount: effectiveQuery.amount,
+        wantsGeneralSavings: effectiveQuery.wantsGeneralSavings,
+      });
+      await this.sender.sendTextMessage(
+        from,
+        this.withConfirmations(confirmation, ASK_ZONE_MESSAGE),
       );
       return;
     }
@@ -210,7 +295,7 @@ export class HandleWhatsAppMessageUseCase {
 
     await this.sender.sendTextMessage(
       from,
-      this.withBankConfirmation(bankConfirmation, message),
+      this.withConfirmations(confirmation, message),
     );
 
     // Solo guardamos memoria cuando hubo algo real que recordar — "no
@@ -225,11 +310,11 @@ export class HandleWhatsAppMessageUseCase {
     }
   }
 
-  private withBankConfirmation(
-    bankConfirmation: string | null,
+  private withConfirmations(
+    confirmation: string | null,
     message: string,
   ): string {
-    return bankConfirmation ? `${bankConfirmation}\n\n${message}` : message;
+    return confirmation ? `${confirmation}\n\n${message}` : message;
   }
 
   private async buildReply(

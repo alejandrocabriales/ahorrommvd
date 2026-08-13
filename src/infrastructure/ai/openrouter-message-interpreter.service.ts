@@ -18,6 +18,7 @@ Reglas:
 - branchHint: sucursal o barrio puntual mencionado junto al comercio (ej. "Ta-Ta Pocitos" -> "Pocitos"). null si no aplica.
 - categoryName: SOLO si el usuario no nombra un comercio puntual, uno de "${MVP_CATEGORY_NAMES.join('", "')}". Ej. "voy al súper" -> Supermercados, "necesito una farmacia" -> Farmacias, "quiero comer algo" -> Restaurantes. null si no aplica o si ya hay merchantName. Si el usuario pide un tipo de comercio que NO es ninguna de esas 3 (ej. "verdulería", "ferretería", "ropa", "peluquería"), categoryName va null Y ADEMÁS marcá unsupportedCategory (ver abajo) — nunca lo fuerces a la categoría más parecida.
 - zone: barrio de Montevideo mencionado sin comercio específico (ej. "voy a Punta Carretas"). null si no aplica.
+- city: ciudad o departamento de Uruguay DISTINTO a Montevideo que el usuario dice que es su ubicación (ej. "vivo en Maldonado" -> "Maldonado", "ando por Punta del Este" -> "Punta del Este", "soy de Colonia" -> "Colonia"). NUNCA un barrio de Montevideo — "Pocitos", "Barrio Sur", "Punta Carretas", "Punta Gorda" son barrios, van en zone, no acá. null si no lo dice explícitamente, o si nombra Montevideo mismo (el bot asume Montevideo por default).
 - amount: monto en pesos uruguayos si el usuario dice cuánto gastó o va a gastar (ej. "Ta-Ta 4000" -> 4000). null si no menciona monto.
 - banks: lista de bancos con los que el usuario dice tener tarjeta, SOLO de "${MVP_BANK_NAMES.join('", "')}" (ej. "tengo Itaú y Santander" -> ["Itaú","Santander"], "mi tarjeta es OCA" -> ["OCA"]). Si menciona un banco que no es ninguno de esos tres, ignoralo. null si no menciona ningún banco en este mensaje.
 - showAllBanks: true SOLO si el usuario pide explícitamente ver ofertas de todos los bancos, no solo los suyos (ej. "dame todas las ofertas", "mostrame todo", "todas las promos", "de todos los bancos"). false en cualquier otro caso, incluso si no lo menciona.
@@ -41,6 +42,7 @@ const INTENT_JSON_SCHEMA = {
         enum: [...MVP_CATEGORY_NAMES, null],
       },
       zone: { type: ['string', 'null'] },
+      city: { type: ['string', 'null'] },
       amount: { type: ['number', 'null'] },
       banks: {
         type: ['array', 'null'],
@@ -58,6 +60,7 @@ const INTENT_JSON_SCHEMA = {
       'branchHint',
       'categoryName',
       'zone',
+      'city',
       'amount',
       'banks',
       'showAllBanks',
