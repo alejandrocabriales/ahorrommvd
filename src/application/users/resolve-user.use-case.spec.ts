@@ -77,6 +77,7 @@ describe('ResolveUserUseCase', () => {
           pendingQuery: null,
           conversationContext,
           knownZone: 'Pocitos',
+          knownCity: null,
         }),
       },
     };
@@ -86,6 +87,26 @@ describe('ResolveUserUseCase', () => {
 
     expect(result?.conversationContext).toEqual(conversationContext);
     expect(result?.knownZone).toBe('Pocitos');
+  });
+
+  it('surfaces the known city when the user said they are elsewhere', async () => {
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          banks: [],
+          pendingQuery: null,
+          conversationContext: null,
+          knownZone: null,
+          knownCity: 'Maldonado',
+        }),
+      },
+    };
+    const useCase = new ResolveUserUseCase(prisma as never);
+
+    const result = await useCase.execute('598');
+
+    expect(result?.knownCity).toBe('Maldonado');
   });
 
   it('returns null without creating anything when the user has never been seen before', async () => {

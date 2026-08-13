@@ -9,6 +9,7 @@ export interface ResolvedUser {
   pendingQuery: PendingQuery | null;
   conversationContext: ConversationContext | null;
   knownZone: string | null;
+  knownCity: string | null;
 }
 
 /**
@@ -35,6 +36,7 @@ export class ResolveUserUseCase {
       conversationContext:
         (user.conversationContext as ConversationContext | null) ?? null,
       knownZone: user.knownZone,
+      knownCity: user.knownCity,
     };
   }
 }

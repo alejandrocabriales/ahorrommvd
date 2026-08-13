@@ -19,6 +19,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     branchHint: null,
     categoryName: null,
     zone: null,
+    city: null,
     amount: null,
     banks: null,
     showAllBanks: false,
@@ -60,6 +61,18 @@ const CASES: EvalCase[] = [
   {
     message: 'Voy a Punta Carretas',
     expected: intent({ zone: 'Punta Carretas' }),
+  },
+  {
+    message: 'vivo en Maldonado',
+    expected: intent({ city: 'Maldonado' }),
+  },
+  {
+    message: 'ando por Punta del Este, qué me conviene',
+    expected: intent({ city: 'Punta del Este', wantsGeneralSavings: true }),
+  },
+  {
+    message: 'quiero comer algo, estoy en Barrio Sur',
+    expected: intent({ categoryName: 'Restaurantes', zone: 'Barrio Sur' }), // barrio de Montevideo, NUNCA va en city
   },
   {
     message: 'tengo Itaú y Santander',

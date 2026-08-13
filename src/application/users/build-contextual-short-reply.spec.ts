@@ -10,6 +10,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     branchHint: null,
     categoryName: null,
     zone: null,
+    city: null,
     amount: null,
     banks: null,
     showAllBanks: false,

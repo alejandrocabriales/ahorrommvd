@@ -132,9 +132,17 @@ model User {
   conversationContext Json?   @map("conversation_context")
   // Barrio que el usuario mencionó alguna vez — a diferencia de
   // conversationContext, no vence a los 30 min: es el default de "dónde
-  // está" mientras no diga uno nuevo. Solo informativo (spec: no hay
-  // coordenadas cargadas, nunca filtra resultados por cercanía real).
+  // está" mientras no diga uno nuevo. BrowseByCategoryUseCase lo geocodifica
+  // y filtra candidatos por distancia real (ver ZoneGeocoder) — ya no es
+  // solo informativo.
   knownZone           String? @map("known_zone")
+  // Ciudad/departamento DISTINTO a Montevideo que el usuario dijo alguna
+  // vez que es su ubicación (ej. "vivo en Maldonado"). null = asumimos
+  // Montevideo (spec: "Zona: Montevideo únicamente"). Todavía no hay datos
+  // de comercios reales fuera de Montevideo — mientras esto esté seteado a
+  // otra cosa, el bot avisa que no puede confirmar nada ahí en vez de
+  // inventar una recomendación con datos de Montevideo.
+  knownCity           String? @map("known_city")
 
   @@map("users")
 }

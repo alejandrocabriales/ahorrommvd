@@ -666,6 +666,22 @@ concretas**, en orden de dependencia:
    de Places con sesgo a otra ciudad (hoy el centro está hardcodeado a
    Montevideo en `GooglePlacesBranchDirectoryProvider`).
 
+   **HECHO PARCIAL (13/08/2026)** — la mitad "detectar y guardar" está
+   implementada y probada: `ParsedIntent.city` (nuevo, distinto de
+   `zone` — un barrio de Montevideo NUNCA va acá), `SetUserCityUseCase`
+   guarda `User.knownCity` apenas se detecta (igual que bancos, no
+   depende de que haya un tema que responder), y
+   `HandleWhatsAppMessageUseCase` avisa honestamente en vez de aplicar
+   datos de Montevideo cuando el usuario tiene una ciudad distinta
+   guardada y pide una categoría o "lo mejor en general" — un comercio
+   puntual (`merchantName`) sigue resolviéndose igual sea cual sea la
+   ciudad. La mitad "servir de verdad otra ciudad" (biasear Places a
+   Maldonado, backfillear sucursales reales ahí) **deliberadamente NO
+   se hizo** — sin eso, "guardar la ciudad" solo podía significar
+   "avisar que todavía no hay datos ahí", nunca dar una recomendación
+   real. Es un proyecto de datos aparte (mismo tamaño que el backfill de
+   Montevideo, por cada ciudad nueva), no una bandera para prender.
+
 **Caso real que disparó esto** (no hipotético): usuario con tarjetas
 Itaú+OCA únicamente, `knownZone: "barrio sur"`, preguntó por
 restaurantes — las ÚNICAS promos de Restaurantes vigentes para

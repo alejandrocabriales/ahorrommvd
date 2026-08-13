@@ -15,6 +15,7 @@ import {
   ResolveUserUseCase,
 } from '../users/resolve-user.use-case';
 import { SetUserBanksUseCase } from '../users/set-user-banks.use-case';
+import { SetUserCityUseCase } from '../users/set-user-city.use-case';
 import { SavePendingQueryUseCase } from '../users/save-pending-query.use-case';
 import { ClearPendingQueryUseCase } from '../users/clear-pending-query.use-case';
 import { SaveConversationContextUseCase } from '../users/save-conversation-context.use-case';
@@ -27,6 +28,7 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     branchHint: null,
     categoryName: null,
     zone: null,
+    city: null,
     amount: null,
     banks: null,
     showAllBanks: false,
@@ -48,6 +50,7 @@ const KNOWN_USER: ResolvedUser = {
   // contenido no se pisan con la pregunta de "por qué zona andás" — ese
   // comportamiento se prueba aparte, explícito, más abajo.
   knownZone: 'Pocitos',
+  knownCity: null,
 };
 const UNKNOWN_USER: ResolvedUser | null = null;
 
@@ -127,6 +130,13 @@ describe('HandleWhatsAppMessageUseCase', () => {
         bankNames: ['Itaú', 'Santander'],
       }),
     } as unknown as SetUserBanksUseCase;
+    const setUserCity = {
+      execute: jest
+        .fn()
+        .mockImplementation((_from: string, city: string) =>
+          Promise.resolve({ userId: 'user-1', city }),
+        ),
+    } as unknown as SetUserCityUseCase;
     const savePendingQuery = {
       execute: jest.fn().mockResolvedValue(undefined),
     } as unknown as SavePendingQueryUseCase;
@@ -148,6 +158,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
       registerSaving,
       resolveUser,
       setUserBanks,
+      setUserCity,
       savePendingQuery,
       clearPendingQuery,
       saveConversationContext,
@@ -162,6 +173,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
       registerSaving,
       resolveUser,
       setUserBanks,
+      setUserCity,
       savePendingQuery,
       clearPendingQuery,
       saveConversationContext,
@@ -625,6 +637,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
           pendingQuery: PENDING_RESTAURANTES,
           conversationContext: null,
           knownZone: null,
+          knownCity: null,
         },
       );
 
@@ -653,6 +666,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
           pendingQuery: PENDING_RESTAURANTES,
           conversationContext: null,
           knownZone: null,
+          knownCity: null,
         },
       );
 
@@ -684,6 +698,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
         pendingQuery: PENDING_RESTAURANTES,
         conversationContext: null,
         knownZone: null,
+        knownCity: null,
       });
 
       await useCase.execute('598', 'hola');
@@ -779,6 +794,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
           pendingQuery: PENDING_NO_ZONE,
           conversationContext: null,
           knownZone: null,
+          knownCity: null,
         },
       );
 
@@ -791,6 +807,96 @@ describe('HandleWhatsAppMessageUseCase', () => {
         undefined,
       );
       expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        DEFAULT_AI_REPLY,
+      );
+    });
+  });
+
+  describe('ciudad distinta a Montevideo (knownCity)', () => {
+    it('saves the city and confirms it even when the message has no other topic', async () => {
+      const { useCase, setUserCity, browseByCategory, sender } = build(
+        intent({ city: 'Maldonado' }),
+        undefined,
+        { ...KNOWN_USER, knownCity: null },
+      );
+
+      await useCase.execute('598', 'vivo en Maldonado');
+
+      expect(setUserCity.execute).toHaveBeenCalledWith('598', 'Maldonado');
+      expect(browseByCategory.execute).not.toHaveBeenCalled();
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('Listo, guardé que estás en Maldonado.'),
+      );
+    });
+
+    it('does not save or confirm anything when the stated city is Montevideo itself', async () => {
+      const { useCase, setUserCity, sender } = build(
+        intent({ city: 'Montevideo' }),
+        undefined,
+        KNOWN_USER,
+      );
+      (setUserCity.execute as jest.Mock).mockResolvedValue(null);
+
+      await useCase.execute('598', 'vivo en Montevideo');
+
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.not.stringContaining('Listo, guardé que estás en'),
+      );
+    });
+
+    it('declines a category request honestly instead of applying Montevideo data to a different city', async () => {
+      const { useCase, browseByCategory, sender } = build(
+        intent({ categoryName: 'Farmacias' }),
+        undefined,
+        { ...KNOWN_USER, knownCity: 'Maldonado' },
+      );
+
+      await useCase.execute('598', 'necesito una farmacia');
+
+      expect(browseByCategory.execute).not.toHaveBeenCalled();
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('solo tengo datos reales de Montevideo'),
+      );
+    });
+
+    it('declines a general-savings request too, unlike the zone question which exempts it', async () => {
+      const { useCase, browseByCategory, sender } = build(
+        intent({ wantsGeneralSavings: true }),
+        undefined,
+        { ...KNOWN_USER, knownCity: 'Maldonado' },
+      );
+
+      await useCase.execute('598', 'qué me conviene hacer');
+
+      expect(browseByCategory.execute).not.toHaveBeenCalled();
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('solo tengo datos reales de Montevideo'),
+      );
+    });
+
+    it('still resolves a named-merchant search normally even with a different knownCity', async () => {
+      const { useCase, searchUseCase, sender } = build(
+        intent({ merchantName: 'Soho' }),
+        {
+          status: 'resolved',
+          merchantChainName: 'Soho',
+          message: 'Hoy podés ahorrar 25%.',
+          today: TODAY_PROMO,
+          better: null,
+          upcoming: [TODAY_PROMO],
+        },
+        { ...KNOWN_USER, knownCity: 'Maldonado' },
+      );
+
+      await useCase.execute('598', 'Soho');
+
+      expect(searchUseCase.execute).toHaveBeenCalled();
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
         '598',
         DEFAULT_AI_REPLY,

@@ -17,6 +17,14 @@ export interface ParsedIntent {
   categoryName: MvpCategoryName | null;
   /** Zona/barrio mencionado sin comercio específico, ej. "Voy a Punta Carretas". */
   zone: string | null;
+  /**
+   * Ciudad/departamento de Uruguay DISTINTO a Montevideo que el usuario dice
+   * que es su ubicación (ej. "vivo en Maldonado" -> "Maldonado"). Distinto
+   * de `zone`, que es un barrio DENTRO de Montevideo — un barrio nunca va
+   * acá. null si no lo dice explícitamente, o si nombra Montevideo mismo
+   * (spec: el bot asume Montevideo por default).
+   */
+  city: string | null;
   /** Monto en pesos uruguayos si el usuario menciona cuánto gastó, ej. "Ta-Ta 4000". */
   amount: number | null;
   /** Bancos con los que el usuario dice tener tarjeta, ej. "tengo Itaú y Santander". null si no lo menciona en este mensaje. */

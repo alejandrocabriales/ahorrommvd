@@ -14,6 +14,7 @@ import { buildRecommendationFromSearch } from '../search/build-recommendation-fr
 import { SearchUseCase } from '../search/search.use-case';
 import { ResolveUserUseCase } from '../users/resolve-user.use-case';
 import { SetUserBanksUseCase } from '../users/set-user-banks.use-case';
+import { SetUserCityUseCase } from '../users/set-user-city.use-case';
 import { SavePendingQueryUseCase } from '../users/save-pending-query.use-case';
 import { ClearPendingQueryUseCase } from '../users/clear-pending-query.use-case';
 import { SaveConversationContextUseCase } from '../users/save-conversation-context.use-case';
@@ -76,6 +77,7 @@ export class HandleWhatsAppMessageUseCase {
     private readonly registerSaving: RegisterSavingUseCase,
     private readonly resolveUser: ResolveUserUseCase,
     private readonly setUserBanks: SetUserBanksUseCase,
+    private readonly setUserCity: SetUserCityUseCase,
     private readonly savePendingQuery: SavePendingQueryUseCase,
     private readonly clearPendingQuery: ClearPendingQueryUseCase,
     private readonly saveConversationContext: SaveConversationContextUseCase,
@@ -98,6 +100,21 @@ export class HandleWhatsAppMessageUseCase {
           : null;
     }
 
+    // Igual que bancos: se guarda apenas se detecta, no depende de que este
+    // mensaje tenga un tema que responder ("vivo en Maldonado" solo, sin
+    // pedir nada más, igual queda guardado).
+    let cityConfirmation: string | null = null;
+    if (intent.city) {
+      const result = await this.setUserCity.execute(from, intent.city);
+      cityConfirmation = result
+        ? `Listo, guardé que estás en ${result.city}.`
+        : null;
+    }
+
+    const confirmation =
+      [bankConfirmation, cityConfirmation].filter(Boolean).join('\n\n') ||
+      null;
+
     const user = await this.resolveUser.execute(from);
     const hasKnownBanks = (user?.bankNames.length ?? 0) > 0;
     const context = user?.conversationContext ?? null;
@@ -114,7 +131,7 @@ export class HandleWhatsAppMessageUseCase {
       }
       await this.sender.sendTextMessage(
         from,
-        this.withBankConfirmation(bankConfirmation, UNSUPPORTED_CATEGORY_MESSAGE),
+        this.withConfirmations(confirmation, UNSUPPORTED_CATEGORY_MESSAGE),
       );
       return;
     }
@@ -134,7 +151,7 @@ export class HandleWhatsAppMessageUseCase {
       });
       await this.sender.sendTextMessage(
         from,
-        this.withBankConfirmation(bankConfirmation, shortReply),
+        this.withConfirmations(confirmation, shortReply),
       );
       return;
     }
@@ -182,6 +199,36 @@ export class HandleWhatsAppMessageUseCase {
       zone: rawEffectiveQuery.zone ?? (hasTopic ? (user?.knownZone ?? null) : null),
     };
 
+    // El usuario dijo alguna vez que está en otra ciudad (knownCity) y pide
+    // una categoría/lo mejor en general — ahí no hay nada real que
+    // recomendar todavía (el catálogo entero es de Montevideo), así que
+    // avisamos en vez de aplicar datos de Montevideo como si sirvieran ahí.
+    // Antes de banks/zone a propósito: no tiene sentido juntar más info
+    // para una consulta que de entrada no podemos responder. Un comercio
+    // puntual (merchantName) sigue andando igual — quizás preguntan por
+    // algo que sí conocemos, sea cual sea la ciudad.
+    const needsCityDecline =
+      Boolean(user?.knownCity) &&
+      !rawEffectiveQuery.merchantName &&
+      (Boolean(rawEffectiveQuery.categoryName) ||
+        rawEffectiveQuery.wantsGeneralSavings);
+
+    if (needsCityDecline) {
+      if (user?.pendingQuery) {
+        await this.clearPendingQuery.execute(from);
+      }
+      await this.sender.sendTextMessage(
+        from,
+        this.withConfirmations(
+          confirmation,
+          `Por ahora solo tengo datos reales de Montevideo — en ${user!.knownCity} ` +
+            'todavía no puedo confirmarte nada. Si me decís el nombre de un ' +
+            'comercio puntual lo busco igual.',
+        ),
+      );
+      return;
+    }
+
     const needsBankQuestion = hasTopic && !hasKnownBanks && !intent.showAllBanks;
 
     if (needsBankQuestion) {
@@ -198,7 +245,7 @@ export class HandleWhatsAppMessageUseCase {
       });
       await this.sender.sendTextMessage(
         from,
-        this.withBankConfirmation(bankConfirmation, ASK_BANKS_MESSAGE),
+        this.withConfirmations(confirmation, ASK_BANKS_MESSAGE),
       );
       return;
     }
@@ -225,7 +272,7 @@ export class HandleWhatsAppMessageUseCase {
       });
       await this.sender.sendTextMessage(
         from,
-        this.withBankConfirmation(bankConfirmation, ASK_ZONE_MESSAGE),
+        this.withConfirmations(confirmation, ASK_ZONE_MESSAGE),
       );
       return;
     }
@@ -248,7 +295,7 @@ export class HandleWhatsAppMessageUseCase {
 
     await this.sender.sendTextMessage(
       from,
-      this.withBankConfirmation(bankConfirmation, message),
+      this.withConfirmations(confirmation, message),
     );
 
     // Solo guardamos memoria cuando hubo algo real que recordar — "no
@@ -263,11 +310,11 @@ export class HandleWhatsAppMessageUseCase {
     }
   }
 
-  private withBankConfirmation(
-    bankConfirmation: string | null,
+  private withConfirmations(
+    confirmation: string | null,
     message: string,
   ): string {
-    return bankConfirmation ? `${bankConfirmation}\n\n${message}` : message;
+    return confirmation ? `${confirmation}\n\n${message}` : message;
   }
 
   private async buildReply(
