@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { PlacesModule } from '../../infrastructure/places/places.module';
 import { BranchesController } from '../../presentation/http/controllers/branches.controller';
 import { PromotionsController } from '../../presentation/http/controllers/promotions.controller';
 import { SearchController } from '../../presentation/http/controllers/search.controller';
@@ -9,6 +10,7 @@ import { ResolveMerchantUseCase } from './resolve-merchant.use-case';
 import { SearchUseCase } from './search.use-case';
 
 @Module({
+  imports: [PlacesModule],
   controllers: [SearchController, BranchesController, PromotionsController],
   providers: [
     MerchantSearchService,

@@ -1,10 +1,16 @@
 import { PaymentType } from '../../../generated/prisma/client';
+import { GeoPoint } from '../../domain/geocoding/geo-point';
+import type { ZoneGeocoder } from '../../domain/geocoding/zone-geocoder.port';
 import { addDays, endOfDay, startOfDay } from './compute-promotion-comparison';
 import { BrowseByCategoryUseCase } from './browse-by-category.use-case';
 
+// Coordenada default para candidatos "verificados" cuando el test no le
+// importa dónde exactamente — cerca del centro de Montevideo.
+const MONTEVIDEO_POINT: GeoPoint = { latitude: -34.9, longitude: -56.16 };
+
 interface FakePromoRow {
   merchantChainId: string;
-  merchantChain: { name: string; _count: { branches: number } };
+  merchantChain: { name: string; branches: GeoPoint[] };
   bank: { name: string };
   discountPercentage: number;
   paymentType: PaymentType;
@@ -21,10 +27,18 @@ function row(
     merchantChainName: string;
     /** default true — la mayoría de los tests no le importa el filtro de Montevideo. */
     hasVerifiedBranch?: boolean;
+    /** coordenada puntual de la sucursal, para tests de distancia — implica hasVerifiedBranch. */
+    branchPoint?: GeoPoint;
   },
 ): FakePromoRow {
   const today = new Date();
-  const { merchantChainName, hasVerifiedBranch, ...rest } = overrides;
+  const { merchantChainName, hasVerifiedBranch, branchPoint, ...rest } =
+    overrides;
+  const branches = branchPoint
+    ? [branchPoint]
+    : hasVerifiedBranch === false
+      ? []
+      : [MONTEVIDEO_POINT];
   return {
     bank: { name: 'Itaú' },
     discountPercentage: 10,
@@ -35,15 +49,17 @@ function row(
     validUntil: endOfDay(today),
     sourceUrl: 'https://example.com',
     ...rest,
-    merchantChain: {
-      name: merchantChainName,
-      _count: { branches: hasVerifiedBranch === false ? 0 : 1 },
-    },
+    merchantChain: { name: merchantChainName, branches },
   };
 }
 
 function buildPrisma(rows: FakePromoRow[]) {
   return { promotion: { findMany: jest.fn().mockResolvedValue(rows) } };
+}
+
+/** default: no geocodifica nada (como si el zone no se pudiera resolver) — así los tests que no le importa la distancia no se ven afectados por el filtro nuevo. */
+function fakeGeocoder(point: GeoPoint | null = null): ZoneGeocoder {
+  return { geocode: jest.fn().mockResolvedValue(point) };
 }
 
 describe('BrowseByCategoryUseCase', () => {
@@ -80,7 +96,7 @@ describe('BrowseByCategoryUseCase', () => {
         bank: { name: 'Itaú' },
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Farmacias', null, undefined);
 
@@ -116,7 +132,7 @@ describe('BrowseByCategoryUseCase', () => {
         discountPercentage: 15,
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Farmacias', null, undefined);
 
@@ -142,7 +158,7 @@ describe('BrowseByCategoryUseCase', () => {
         validUntil: endOfDay(addDays(today, 2)),
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Farmacias', null, undefined);
 
@@ -172,7 +188,7 @@ describe('BrowseByCategoryUseCase', () => {
         validUntil: endOfDay(addDays(today, 1)),
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Farmacias', null, undefined);
 
@@ -181,7 +197,7 @@ describe('BrowseByCategoryUseCase', () => {
 
   it('marks nothingFound when there are no promotions at all in the window', async () => {
     const prisma = buildPrisma([]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Farmacias', null, undefined);
 
@@ -203,7 +219,7 @@ describe('BrowseByCategoryUseCase', () => {
         discountPercentage: 20,
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute(null, null, undefined);
 
@@ -230,7 +246,7 @@ describe('BrowseByCategoryUseCase', () => {
         bank: { name: 'Itaú' },
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Farmacias', null, undefined, 600);
 
@@ -254,7 +270,7 @@ describe('BrowseByCategoryUseCase', () => {
         validUntil: endOfDay(addDays(today, 1)),
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Farmacias', null, undefined, 4000);
 
@@ -270,7 +286,7 @@ describe('BrowseByCategoryUseCase', () => {
         discountPercentage: 15,
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Farmacias', null, undefined);
 
@@ -293,7 +309,7 @@ describe('BrowseByCategoryUseCase', () => {
         hasVerifiedBranch: true,
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Restaurantes', 'Barrio Sur', undefined);
 
@@ -310,7 +326,7 @@ describe('BrowseByCategoryUseCase', () => {
         hasVerifiedBranch: false,
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Restaurantes', null, undefined);
 
@@ -318,7 +334,7 @@ describe('BrowseByCategoryUseCase', () => {
     expect(rec.nothingFound).toBe(false);
   });
 
-  it('passes the query label and zone through untouched (zone is informational, never a proximity filter)', async () => {
+  it('passes the query label and zone through untouched, and never invents a "neighborhood" without real branch data', async () => {
     const prisma = buildPrisma([
       row({
         merchantChainId: 'c1',
@@ -326,13 +342,81 @@ describe('BrowseByCategoryUseCase', () => {
         discountPercentage: 10,
       }),
     ]);
-    const useCase = new BrowseByCategoryUseCase(prisma as never);
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
 
     const rec = await useCase.execute('Farmacias', 'Pocitos', undefined);
 
     expect(rec.queryLabel).toBe('Farmacias');
     expect(rec.zone).toBe('Pocitos');
-    // Sin datos reales de sucursal, nunca inventamos "neighborhood".
     expect(rec.bestToday?.neighborhood).toBeNull();
+  });
+
+  it('keeps candidates unfiltered when the zone cannot be geocoded (never blocks a recommendation over a geocoding miss)', async () => {
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 10,
+      }),
+    ]);
+    // fakeGeocoder() default resuelve a null, como si "Pocitos" no se
+    // pudiera geocodificar (API caída, zona no reconocida, etc.)
+    const useCase = new BrowseByCategoryUseCase(prisma as never, fakeGeocoder());
+
+    const rec = await useCase.execute('Farmacias', 'Pocitos', undefined);
+
+    expect(rec.bestToday?.merchantChainName).toBe('Farmashop');
+  });
+
+  it('prefers a chain near the geocoded zone over a higher % chain far away in a different barrio ("no me sirve un restaurante en Pocitos si estoy en Barrio Sur")', async () => {
+    const barrioSur: GeoPoint = { latitude: -34.9108776, longitude: -56.1881819 };
+    const pocitos: GeoPoint = { latitude: -34.9085301, longitude: -56.1504057 }; // ~3.5km de Barrio Sur, otro barrio
+
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Restaurante en Pocitos',
+        discountPercentage: 25,
+        branchPoint: pocitos,
+      }),
+      row({
+        merchantChainId: 'c2',
+        merchantChainName: 'Restaurante en Barrio Sur',
+        discountPercentage: 15,
+        branchPoint: barrioSur,
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(barrioSur),
+    );
+
+    const rec = await useCase.execute('Restaurantes', 'Barrio Sur', undefined);
+
+    expect(rec.bestToday?.merchantChainName).toBe('Restaurante en Barrio Sur');
+    expect(rec.alternatives).toEqual([]);
+  });
+
+  it('falls back to all verified candidates when none are within range of the geocoded zone (better than showing nothing)', async () => {
+    const barrioSur: GeoPoint = { latitude: -34.9108776, longitude: -56.1881819 };
+    const pocitos: GeoPoint = { latitude: -34.9085301, longitude: -56.1504057 };
+
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Restaurante en Pocitos',
+        discountPercentage: 25,
+        branchPoint: pocitos,
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(barrioSur),
+    );
+
+    const rec = await useCase.execute('Restaurantes', 'Barrio Sur', undefined);
+
+    expect(rec.bestToday?.merchantChainName).toBe('Restaurante en Pocitos');
+    expect(rec.nothingFound).toBe(false);
   });
 });
