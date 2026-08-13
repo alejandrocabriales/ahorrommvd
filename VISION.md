@@ -640,3 +640,42 @@ agregar casos) y la 4/5 (localización real con lat/long — la más grande,
 depende de un proyecto de datos aparte, no debería ser lo primero). Todo
 lo demás de las secciones 1-14, 16-18 ya está implementado o
 explícitamente fuera de alcance (sección 15).
+
+**Sección 4/5, alcance confirmado con el usuario (12/08/2026, sesión del
+bug de Soho/Chajá) — ya no es solo "distancia real", son 4 piezas
+concretas**, en orden de dependencia:
+
+1. **Geocodificar el barrio dicho por el usuario** ("Barrio Sur" →
+   coordenadas) — no existe ningún paso de geocoding hoy, todo lo que
+   hay es `zone: string | null` sin resolver a nada. Reusar
+   `GOOGLE_PLACES_API_KEY` (ya configurada, usada hoy solo para el
+   backfill de sucursales).
+2. **Filtrar/ordenar candidatos por distancia real**, no por % más alto
+   a secas — reemplaza el `pickBest` actual de
+   `compute-promotion-comparison.ts` (hoy: descuento desc, después
+   `capAmount` desc, sin geografía) para `BrowseByCategoryUseCase`. Ya
+   hay lat/long reales por sucursal verificada (backfill de hoy) para
+   apoyarse.
+3. **Preguntar la zona cuando no la tenemos**, en vez de recomendar a
+   ciegas — mismo patrón que ya existe para preguntar bancos
+   (`ASK_BANKS_MESSAGE` / `pendingQuery` en
+   `HandleWhatsAppMessageUseCase`), pero para ubicación.
+4. **Ciudad ≠ barrio**: "vivo en Maldonado" es un override de ciudad
+   completo (`knownCity`, nuevo, mismo patrón que `knownZone` hoy),
+   default Montevideo si no lo dice. Requiere poder correr el backfill
+   de Places con sesgo a otra ciudad (hoy el centro está hardcodeado a
+   Montevideo en `GooglePlacesBranchDirectoryProvider`).
+
+**Caso real que disparó esto** (no hipotético): usuario con tarjetas
+Itaú+OCA únicamente, `knownZone: "barrio sur"`, preguntó por
+restaurantes — las ÚNICAS promos de Restaurantes vigentes para
+Itaú/OCA hoy son Soho (Punta del Este) y Chajá, ambas sin sucursal
+verificada en Montevideo; todas las alternativas reales (Porto Vanila,
+BBC Burger & Sushi, etc.) son Santander-only. El fallback de
+`BrowseByCategoryUseCase` ("si no hay nada verificado, mostrar sin
+filtrar antes que decir 'no encontré nada'") terminó recomendando Soho
+con el mismo tono seguro que una promo real, sin aclarar que está a 2
+horas de Montevideo. Con las piezas 1-4 arriba, la respuesta correcta
+sería preguntar el barrio si falta, y si de verdad no hay nada
+verificado ahí cerca para esas tarjetas, decirlo explícito en vez de
+sonar seguro de una opción fuera de zona.
