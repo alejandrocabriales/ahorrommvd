@@ -50,4 +50,15 @@ export interface Recommendation {
   spentAmount: number | null;
   /** true si el usuario preguntó explícitamente dónde queda el comercio — le dice al Response Generator que priorice `bestToday.address` en vez de repetir el descuento, o que sea honesto si no tenemos esa dirección cargada. */
   asksLocation: boolean;
+  /**
+   * true si `bestToday` no tiene ninguna sucursal verificada en Montevideo
+   * (ver `hasVerifiedMontevideoBranch` en BrowseByCategoryUseCase) — la
+   * promo existe de verdad, pero no pudimos confirmar que el comercio esté
+   * en Montevideo (puede estar en otra ciudad, como pasó con Soho/Punta del
+   * Este). Solo se usa en la recomendación por categoría — una búsqueda por
+   * comercio puntual siempre queda en false, ahí el usuario ya eligió qué
+   * quiere. El Response Generator tiene que avisarlo, nunca recomendarlo
+   * con la misma confianza que una opción verificada.
+   */
+  locationUnverified: boolean;
 }

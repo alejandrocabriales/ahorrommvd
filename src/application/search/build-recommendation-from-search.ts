@@ -64,5 +64,9 @@ export function buildRecommendationFromSearch(
     nothingFound: !result.today && !result.better,
     spentAmount: amount,
     asksLocation,
+    // El usuario nombró este comercio puntual — no hay nada que "verificar",
+    // eligió qué quiere, distinto del caso de categoría donde el backend
+    // elige por él.
+    locationUnverified: false,
   };
 }
