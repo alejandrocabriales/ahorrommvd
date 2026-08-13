@@ -44,7 +44,10 @@ const KNOWN_USER: ResolvedUser = {
   bankNames: ['Itaú'],
   pendingQuery: null,
   conversationContext: null,
-  knownZone: null,
+  // Por default el usuario YA tiene zona conocida, así los tests de
+  // contenido no se pisan con la pregunta de "por qué zona andás" — ese
+  // comportamiento se prueba aparte, explícito, más abajo.
+  knownZone: 'Pocitos',
 };
 const UNKNOWN_USER: ResolvedUser | null = null;
 
@@ -373,7 +376,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     expect(browseByCategory.execute).toHaveBeenCalledWith(
       'Farmacias',
-      null,
+      'Pocitos', // default de KNOWN_USER.knownZone, el mensaje no trajo uno propio
       'user-1',
       undefined,
     );
@@ -407,7 +410,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     expect(browseByCategory.execute).toHaveBeenCalledWith(
       null,
-      null,
+      'Pocitos', // default de KNOWN_USER.knownZone
       'user-1',
       undefined,
     );
@@ -492,7 +495,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Farmacias',
-        null,
+        'Pocitos', // default de KNOWN_USER.knownZone
         undefined,
         undefined,
       );
@@ -575,16 +578,23 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     it('does not ask when the user says "dame todas" right away — answers unfiltered directly', async () => {
       const { useCase, browseByCategory, savePendingQuery, sender } = build(
-        intent({ categoryName: 'Restaurantes', showAllBanks: true }),
+        // zone en el mensaje mismo: usuario desconocido no tiene knownZone
+        // que default-ear, y sin zone el nuevo gate de "¿por qué zona
+        // andás?" dispararía antes de llegar acá.
+        intent({
+          categoryName: 'Restaurantes',
+          showAllBanks: true,
+          zone: 'Barrio Sur',
+        }),
         undefined,
         UNKNOWN_USER,
       );
 
-      await useCase.execute('598', 'dame todas las ofertas de restaurantes');
+      await useCase.execute('598', 'dame todas las ofertas de restaurantes en Barrio Sur');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Restaurantes',
-        null,
+        'Barrio Sur',
         undefined,
         undefined,
       );
@@ -688,6 +698,106 @@ describe('HandleWhatsAppMessageUseCase', () => {
     });
   });
 
+  describe('pregunta el barrio antes de contestar (sin zona conocida)', () => {
+    it('asks for the zone before recommending a named category, and saves the query as pending', async () => {
+      const { useCase, browseByCategory, savePendingQuery, sender } = build(
+        intent({ categoryName: 'Restaurantes' }),
+        undefined,
+        { ...KNOWN_USER, knownZone: null },
+      );
+
+      await useCase.execute('598', 'quiero comer algo');
+
+      expect(browseByCategory.execute).not.toHaveBeenCalled();
+      expect(savePendingQuery.execute).toHaveBeenCalledWith('598', {
+        merchantName: null,
+        branchHint: null,
+        categoryName: 'Restaurantes',
+        zone: null,
+        amount: null,
+        wantsGeneralSavings: false,
+      });
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('¿Por qué zona'),
+      );
+    });
+
+    it('does not ask on a general-savings query — "quiero ahorrar hoy" is intentionally city-wide', async () => {
+      const { useCase, browseByCategory, savePendingQuery } = build(
+        intent({ wantsGeneralSavings: true }),
+        undefined,
+        { ...KNOWN_USER, knownZone: null },
+      );
+
+      await useCase.execute('598', 'quiero ahorrar hoy');
+
+      expect(savePendingQuery.execute).not.toHaveBeenCalled();
+      expect(browseByCategory.execute).toHaveBeenCalledWith(
+        null,
+        null,
+        'user-1',
+        undefined,
+      );
+    });
+
+    it('does not ask when a bank question is still pending — banks go first', async () => {
+      const { useCase, browseByCategory, savePendingQuery, sender } = build(
+        intent({ categoryName: 'Restaurantes' }),
+        undefined,
+        UNKNOWN_USER,
+      );
+
+      await useCase.execute('598', 'quiero comer algo');
+
+      expect(browseByCategory.execute).not.toHaveBeenCalled();
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('¿Qué tarjetas tenés?'),
+      );
+      expect(savePendingQuery.execute).toHaveBeenCalledWith(
+        '598',
+        expect.objectContaining({ zone: null }),
+      );
+    });
+
+    it('resumes the pending category when the follow-up answers with just a barrio, instead of dropping the original topic', async () => {
+      const PENDING_NO_ZONE: PendingQuery = {
+        merchantName: null,
+        branchHint: null,
+        categoryName: 'Restaurantes',
+        zone: null,
+        amount: null,
+        wantsGeneralSavings: false,
+      };
+      const { useCase, browseByCategory, clearPendingQuery, sender } = build(
+        intent({ zone: 'Pocitos' }),
+        undefined,
+        {
+          id: 'user-1',
+          bankNames: ['Itaú'],
+          pendingQuery: PENDING_NO_ZONE,
+          conversationContext: null,
+          knownZone: null,
+        },
+      );
+
+      await useCase.execute('598', 'Pocitos');
+
+      expect(browseByCategory.execute).toHaveBeenCalledWith(
+        'Restaurantes',
+        'Pocitos',
+        'user-1',
+        undefined,
+      );
+      expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        DEFAULT_AI_REPLY,
+      );
+    });
+  });
+
   describe('memoria conversacional de corto plazo (~30 min)', () => {
     const FARMACIAS_CONTEXT_QUERY: PendingQuery = {
       merchantName: null,
@@ -725,7 +835,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Farmacias',
-        null,
+        'Pocitos', // default de KNOWN_USER.knownZone (el contexto guardado no traía uno)
         'user-1',
         600,
       );
@@ -843,7 +953,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Farmacias',
-        null,
+        'Pocitos', // default de KNOWN_USER.knownZone
         'user-1',
         undefined,
       );
@@ -866,7 +976,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Farmacias',
-        null,
+        'Pocitos', // default de KNOWN_USER.knownZone
         'user-1',
         undefined,
       );

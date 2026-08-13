@@ -28,6 +28,9 @@ const NOT_FOUND_MESSAGE =
 const ASK_BANKS_MESSAGE =
   '¿Qué tarjetas tenés? Contame (ej. "tengo Itaú y Santander") o escribí ' +
   '"dame todas" para ver todas las ofertas sin filtrar.';
+const ASK_ZONE_MESSAGE =
+  '¿Por qué zona de Montevideo andás? Así te tiro algo cerca tuyo, no ' +
+  'una promo del otro lado de la ciudad.';
 const UNSUPPORTED_CATEGORY_MESSAGE =
   'Por ahora solo tengo cargados descuentos de Supermercados, Farmacias y ' +
   'Restaurantes. Para pedir otra categoría, entrá acá y escribinos a ' +
@@ -137,15 +140,23 @@ export class HandleWhatsAppMessageUseCase {
     }
 
     // Un mensaje "puro" de respuesta (sin comercio/categoría propios) que
-    // trae bancos o pide "todas" contesta la pregunta pendiente, si había.
+    // trae bancos, pide "todas", o solo un barrio (respuesta a
+    // ASK_ZONE_MESSAGE, ej. "Pocitos") contesta la pregunta pendiente, si
+    // había.
     const isAnswerToPending =
       !intent.merchantName &&
       !intent.categoryName &&
-      (intent.showAllBanks || (intent.banks?.length ?? 0) > 0);
+      (intent.showAllBanks ||
+        (intent.banks?.length ?? 0) > 0 ||
+        Boolean(intent.zone));
 
+    // Al restaurar el pending, el barrio de ESTE mensaje pisa el que tenía
+    // guardado (que es null — por eso se había preguntado) — si no, la
+    // respuesta a ASK_ZONE_MESSAGE se perdería y quedaría preguntando de
+    // nuevo en un loop.
     const rawEffectiveQuery: PendingQuery =
       isAnswerToPending && user?.pendingQuery
-        ? user.pendingQuery
+        ? { ...user.pendingQuery, zone: intent.zone ?? user.pendingQuery.zone }
         : mergeWithContext(intent, context, now);
 
     // Un barrio SOLO (sin comercio/categoría propios, ej. "Pocitos" a secas)
@@ -163,9 +174,9 @@ export class HandleWhatsAppMessageUseCase {
 
     // Ubicación contextual: si ya hay un tema real y ni el mensaje ni la
     // memoria de 30 min traen un barrio, usamos el conocido del usuario de
-    // default — no cambia el resultado (no hay filtro por cercanía real
-    // todavía), así que no vale la pena volver a preguntar. Nunca alcanza
-    // por sí solo para inventar un tema donde no lo hay.
+    // default (BrowseByCategoryUseCase sí filtra por distancia real desde
+    // acá — ver ZoneGeocoder). Nunca alcanza por sí solo para inventar un
+    // tema donde no lo hay.
     const effectiveQuery: PendingQuery = {
       ...rawEffectiveQuery,
       zone: rawEffectiveQuery.zone ?? (hasTopic ? (user?.knownZone ?? null) : null),
@@ -188,6 +199,33 @@ export class HandleWhatsAppMessageUseCase {
       await this.sender.sendTextMessage(
         from,
         this.withBankConfirmation(bankConfirmation, ASK_BANKS_MESSAGE),
+      );
+      return;
+    }
+
+    // Pidió una categoría puntual ("necesito una farmacia") y no sabemos ni
+    // el barrio del mensaje ni el knownZone guardado — sin eso
+    // BrowseByCategoryUseCase no tiene con qué filtrar por distancia real.
+    // Acotado a categoryName puntual (no a wantsGeneralSavings/zone-solo):
+    // "quiero ahorrar hoy" es a propósito una consulta amplia de toda
+    // Montevideo, no vale la pena la fricción de preguntar ahí.
+    const needsZoneQuestion =
+      Boolean(effectiveQuery.categoryName) &&
+      !effectiveQuery.merchantName &&
+      !effectiveQuery.zone;
+
+    if (needsZoneQuestion) {
+      await this.savePendingQuery.execute(from, {
+        merchantName: effectiveQuery.merchantName,
+        branchHint: effectiveQuery.branchHint,
+        categoryName: effectiveQuery.categoryName,
+        zone: effectiveQuery.zone,
+        amount: effectiveQuery.amount,
+        wantsGeneralSavings: effectiveQuery.wantsGeneralSavings,
+      });
+      await this.sender.sendTextMessage(
+        from,
+        this.withBankConfirmation(bankConfirmation, ASK_ZONE_MESSAGE),
       );
       return;
     }
