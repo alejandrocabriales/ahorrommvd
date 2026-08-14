@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ReportingModule } from './application/reporting/reporting.module';
 import { SavingsModule } from './application/savings/savings.module';
 import { SearchModule } from './application/search/search.module';
 import { WhatsAppModule } from './application/whatsapp/whatsapp.module';
@@ -15,6 +16,7 @@ import { HealthController } from './presentation/http/controllers/health.control
     ScheduleModule.forRoot(),
     PrismaModule,
     ScrapingModule,
+    ReportingModule,
     PlacesModule,
     SearchModule,
     SavingsModule,

@@ -27,6 +27,8 @@
     "scrape:run": "npm run build && node dist/src/infrastructure/scrapers/scrape-promotions.script.js",
     "branches:sync:local": "npm run build && node dist/src/infrastructure/places/sync-branches.script.js",
     "branches:sync:prod": "npm run build && node dist/src/infrastructure/places/sync-branches.script.js --prod",
+    "data:report": "npm run build && node dist/src/infrastructure/reporting/data-report.script.js",
+    "data:report:prod": "npm run build && node dist/src/infrastructure/reporting/data-report.script.js --prod",
     "ai:test": "tsx src/infrastructure/ai/nlu-eval.script.ts",
     "ai:test:response": "tsx src/infrastructure/ai/response-eval.script.ts"
   },

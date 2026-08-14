@@ -2,7 +2,10 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { MvpCategoryName } from '../../domain/scraping/mvp-category';
 import { PromotionSummary } from '../../domain/search/search-result';
-import { Recommendation } from '../../domain/recommendation/recommendation';
+import {
+  Recommendation,
+  RecommendationOption,
+} from '../../domain/recommendation/recommendation';
 import { distanceKm } from '../../domain/geocoding/distance';
 import { GeoPoint } from '../../domain/geocoding/geo-point';
 import { ZONE_GEOCODER } from '../../domain/geocoding/zone-geocoder.port';
@@ -97,9 +100,10 @@ export class BrowseByCategoryUseCase {
         ...(categoryName
           ? { merchantChain: { category: { name: categoryName } } }
           : {}),
-        ...(allowedBankNames
-          ? { bank: { name: { in: [...allowedBankNames] } } }
-          : {}),
+        // El filtro por banco NO va acá: traemos todo y filtramos en
+        // memoria (son decenas de filas, no miles) para poder responder
+        // "con tus tarjetas no hay, pero con Santander sí" en vez de
+        // dejar al usuario en un no seco.
       },
       include: {
         bank: true,
@@ -143,30 +147,14 @@ export class BrowseByCategoryUseCase {
       };
     });
 
-    // Solo recomendamos cadenas con sucursal verificada en Montevideo (spec:
-    // "Zona: Montevideo únicamente"). Si ninguna la tiene, NO hay
-    // recomendación — `unverifiedOnly` explica por qué. Antes había un
-    // fallback que mostraba las no verificadas "mejor que decir no encontré
-    // nada", y en vivo terminó ofreciendo Soho (Punta del Este) y Chajá a un
-    // usuario Itaú+OCA que preguntó dónde comer: exactamente lo que el
-    // usuario pidió que no pase ("si no tiene nada, no debe inventar").
-    const verified = candidatesRaw.filter((c) => c.branches.length > 0);
     const zonePoint = await this.geocodeZone(zone);
-    const nearby = zonePoint
-      ? verified.filter((c) =>
-          c.branches.some(
-            (b) => distanceKm(zonePoint, b.point) <= NEARBY_RADIUS_KM,
-          ),
-        )
-      : verified;
-
-    // Nada confirmado en el barrio del usuario, pero sí en otra parte de
-    // Montevideo: seguimos recomendando (mejor eso que nada) pero queda
-    // marcado para que la respuesta lo diga en vez de hacerlo pasar por
-    // "cerca tuyo".
-    const zoneWidened =
-      Boolean(zonePoint) && verified.length > 0 && nearby.length === 0;
-    const candidates = nearby.length > 0 ? nearby : verified;
+    const mine = allowedBankNames
+      ? candidatesRaw.filter((c) => allowedBankNames.has(c.bankName))
+      : candidatesRaw;
+    const { candidates, verified, zoneWidened } = selectRecommendable(
+      mine,
+      zonePoint,
+    );
 
     const comparison = computePromotionComparison(candidates, today);
     const estimatedSaving = computeEstimatedSaving(comparison.today, amount);
@@ -180,6 +168,8 @@ export class BrowseByCategoryUseCase {
     const alternatives = todayActive
       .filter((c) => c.merchantChainId !== comparison.today?.merchantChainId)
       .slice(0, MAX_ALTERNATIVES);
+
+    const nothingFound = !comparison.today && !comparison.better;
 
     return {
       queryLabel: categoryName ?? 'lo mejor de hoy en Montevideo',
@@ -206,19 +196,51 @@ export class BrowseByCategoryUseCase {
             cappedByBank: estimatedSaving.cappedByBank,
           }
         : null,
-      nothingFound: !comparison.today && !comparison.better,
+      nothingFound,
       spentAmount: amount ?? null,
       // Había promos vigentes de la categoría, pero ninguna en una cadena
       // que podamos confirmar en Montevideo — no recomendamos ninguna, y
       // esto le dice a la respuesta por qué no es lo mismo que "no hay
       // promos".
-      unverifiedOnly: verified.length === 0 && candidatesRaw.length > 0,
+      unverifiedOnly: verified.length === 0 && mine.length > 0,
       zoneWidened,
+      // Con SUS tarjetas no hay nada, pero con otro banco sí y está
+      // confirmado igual que el resto — decirlo es más útil que un "no
+      // tengo nada" seco, y no es una recomendación: no puede usarla salvo
+      // que tenga esa tarjeta.
+      bestWithOtherBank:
+        nothingFound && allowedBankNames
+          ? this.bestOutsideMyBanks(
+              candidatesRaw,
+              allowedBankNames,
+              zonePoint,
+              today,
+            )
+          : null,
       // Preguntar "dónde queda" solo tiene sentido para un comercio puntual
       // (Response Generator necesita un "address" concreto) — a nivel
       // categoría no hay un único lugar que señalar.
       asksLocation: false,
     };
+  }
+
+  /**
+   * La mejor opción de hoy entre los bancos que el usuario NO tiene, con el
+   * mismo estándar que una recomendación de verdad (sucursal verificada y,
+   * si sabemos el barrio, cerca). Solo se usa cuando con sus tarjetas no hay
+   * nada: sirve para que el "no tengo nada" diga qué se está perdiendo, no
+   * para recomendarle algo que no puede pagar.
+   */
+  private bestOutsideMyBanks(
+    all: CategoryCandidate[],
+    allowedBankNames: Set<string>,
+    zonePoint: GeoPoint | null,
+    today: Date,
+  ): RecommendationOption | null {
+    const others = all.filter((c) => !allowedBankNames.has(c.bankName));
+    const { candidates } = selectRecommendable(others, zonePoint);
+    const best = computePromotionComparison(candidates, today).today;
+    return best ? this.toOption(best, zonePoint) : null;
   }
 
   /**
@@ -254,6 +276,45 @@ export class BrowseByCategoryUseCase {
       return null;
     }
   }
+}
+
+/**
+ * Filtra a lo que de verdad se puede recomendar: solo cadenas con sucursal
+ * verificada en Montevideo (spec: "Zona: Montevideo únicamente") y, si
+ * sabemos el barrio, las que tengan una sucursal cerca. Antes había un
+ * fallback que mostraba las no verificadas "mejor que decir no encontré
+ * nada", y en vivo terminó ofreciendo Soho (Punta del Este) y Chajá a un
+ * usuario Itaú+OCA que preguntó dónde comer: exactamente lo que el usuario
+ * pidió que no pase ("si no tiene nada, no debe inventar").
+ *
+ * `zoneWidened`: nada confirmado en el barrio del usuario pero sí en otra
+ * parte de Montevideo — seguimos recomendando (mejor eso que nada) pero
+ * queda marcado para que la respuesta lo diga en vez de hacerlo pasar por
+ * "cerca tuyo".
+ */
+function selectRecommendable(
+  all: CategoryCandidate[],
+  zonePoint: GeoPoint | null,
+): {
+  candidates: CategoryCandidate[];
+  verified: CategoryCandidate[];
+  zoneWidened: boolean;
+} {
+  const verified = all.filter((c) => c.branches.length > 0);
+  const nearby = zonePoint
+    ? verified.filter((c) =>
+        c.branches.some(
+          (b) => distanceKm(zonePoint, b.point) <= NEARBY_RADIUS_KM,
+        ),
+      )
+    : verified;
+
+  return {
+    verified,
+    candidates: nearby.length > 0 ? nearby : verified,
+    zoneWidened:
+      Boolean(zonePoint) && verified.length > 0 && nearby.length === 0,
+  };
 }
 
 function nearestBranch(

@@ -37,6 +37,24 @@ const UNSUPPORTED_CATEGORY_MESSAGE =
   'Restaurantes. Para pedir otra categoría, entrá acá y escribinos a ' +
   'soporte: https://ahorromvd-landing.netlify.app/';
 
+/**
+ * Con sus tarjetas no hay nada, pero con otro banco sí y está igual de
+ * confirmado — decirlo convierte un "no tengo nada" en información útil
+ * ("Los lugares que conteste tiene que tener direccion y que existir
+ * realmente en la zona", pedido del usuario). Nunca suena a recomendación:
+ * la promo es de una tarjeta que no tiene.
+ */
+function otherBankHint(recommendation: Recommendation): string {
+  const other = recommendation.bestWithOtherBank;
+  if (!other) return '';
+  const place = other.branchName ?? other.merchantChainName;
+  const where = other.address ? ` (${other.address})` : '';
+  return (
+    ` Con ${other.bankName} sí hay ${other.discountPercentage}% en ` +
+    `${place}${where}, por si llegás a tener esa tarjeta.`
+  );
+}
+
 interface ReplyResult {
   message: string;
   /** null cuando no hubo una Recommendation real que valga la pena recordar (no encontrado, desambiguar, no entendí). */
@@ -112,8 +130,7 @@ export class HandleWhatsAppMessageUseCase {
     }
 
     const confirmation =
-      [bankConfirmation, cityConfirmation].filter(Boolean).join('\n\n') ||
-      null;
+      [bankConfirmation, cityConfirmation].filter(Boolean).join('\n\n') || null;
 
     const user = await this.resolveUser.execute(from);
     const hasKnownBanks = (user?.bankNames.length ?? 0) > 0;
@@ -184,9 +201,9 @@ export class HandleWhatsAppMessageUseCase {
     // una recomendación que nadie pidió.
     const hasTopic = Boolean(
       rawEffectiveQuery.merchantName ||
-        rawEffectiveQuery.categoryName ||
-        rawEffectiveQuery.wantsGeneralSavings ||
-        rawEffectiveQuery.zone,
+      rawEffectiveQuery.categoryName ||
+      rawEffectiveQuery.wantsGeneralSavings ||
+      rawEffectiveQuery.zone,
     );
 
     // Ubicación contextual: si ya hay un tema real y ni el mensaje ni la
@@ -196,7 +213,8 @@ export class HandleWhatsAppMessageUseCase {
     // tema donde no lo hay.
     const effectiveQuery: PendingQuery = {
       ...rawEffectiveQuery,
-      zone: rawEffectiveQuery.zone ?? (hasTopic ? (user?.knownZone ?? null) : null),
+      zone:
+        rawEffectiveQuery.zone ?? (hasTopic ? (user?.knownZone ?? null) : null),
     };
 
     // El usuario dijo alguna vez que está en otra ciudad (knownCity) y pide
@@ -229,7 +247,8 @@ export class HandleWhatsAppMessageUseCase {
       return;
     }
 
-    const needsBankQuestion = hasTopic && !hasKnownBanks && !intent.showAllBanks;
+    const needsBankQuestion =
+      hasTopic && !hasKnownBanks && !intent.showAllBanks;
 
     if (needsBankQuestion) {
       // Recortado explícito a la forma de PendingQuery — effectiveQuery
@@ -397,14 +416,22 @@ export class HandleWhatsAppMessageUseCase {
         message:
           `Hoy no tengo ${what} confirmado en Montevideo${cards}. Hay promos ` +
           'vigentes, pero no puedo confirmar que esos comercios tengan local ' +
-          'acá, así que no te las recomiendo. ¿Querés que mire otra categoría?',
-        recommendation: null,
+          'acá, así que no te las recomiendo.' +
+          otherBankHint(recommendation) +
+          ' ¿Querés que mire otra categoría?',
+        // Se guarda igual como contexto: no encontramos nada, pero el tema
+        // sí existió. Sin esto, el "y para tarjetas Itaú?" siguiente se
+        // quedaba sin tema y caía en "no entendí bien qué buscás" (bug
+        // real, conversación del 14/8).
+        recommendation,
       };
     }
     if (recommendation.nothingFound) {
       return {
-        message: `No encontré promociones vigentes para ${recommendation.queryLabel} en los próximos 7 días.`,
-        recommendation: null,
+        message:
+          `No encontré promociones vigentes para ${recommendation.queryLabel} ` +
+          `en los próximos 7 días.${otherBankHint(recommendation)}`,
+        recommendation,
       };
     }
     const message = await this.responseGenerator.generate(recommendation);

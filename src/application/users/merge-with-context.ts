@@ -42,13 +42,20 @@ export function mergeWithContext(
   if (opensNewTopic) return bare(intent);
 
   // Nada que ligue este mensaje al contexto (ni monto, ni zona, ni una
-  // confirmación/espera) -> tratalo como mensaje suelto ("hola"), no
-  // fuerces un seguimiento que no pidieron.
+  // confirmación/espera, ni un cambio de tarjetas) -> tratalo como mensaje
+  // suelto ("hola"), no fuerces un seguimiento que no pidieron.
+  //
+  // Las tarjetas cuentan como seguimiento: "y para tarjetas Itaú?" es la
+  // misma pregunta de recién con otro filtro. Sin esto quedaba sin tema y
+  // se contestaba "no entendí bien qué buscás" (bug real, conversación del
+  // 14/8) justo después de guardarle el banco.
   const hasFollowUpSignal =
     intent.zone !== null ||
     intent.amount !== null ||
     intent.confirmsRecommendation ||
-    intent.prefersToWait;
+    intent.prefersToWait ||
+    (intent.banks?.length ?? 0) > 0 ||
+    intent.showAllBanks;
   if (!hasFollowUpSignal) return bare(intent);
 
   const { query } = context;

@@ -10,7 +10,7 @@ function mockPlacesResponse(places: unknown[]) {
     ok: true,
     json: () => Promise.resolve({ places }),
     text: () => Promise.resolve(''),
-  }) as unknown as typeof fetch;
+  });
 }
 
 // Capturado en vivo contra "Barrio Sur Montevideo".
@@ -27,7 +27,10 @@ const BARRIO_SUR = {
 const OUT_OF_MONTEVIDEO = {
   location: { latitude: -34.9061, longitude: -55.7469 },
   addressComponents: [
-    { longText: 'Departamento de Canelones', types: ['administrative_area_level_1'] },
+    {
+      longText: 'Departamento de Canelones',
+      types: ['administrative_area_level_1'],
+    },
   ],
 };
 

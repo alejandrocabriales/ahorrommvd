@@ -6,8 +6,8 @@ import {
   BRANCH_DIRECTORY_PROVIDER,
   BranchDirectoryProvider,
 } from '../../domain/branches/branch-directory-provider.port';
+import { matchesChainName } from '../../domain/branches/matches-chain-name';
 import { MvpCategoryName } from '../../domain/scraping/mvp-category';
-import { normalizeMerchantName } from '../../domain/scraping/normalize-merchant-name';
 import {
   isInMontevideo,
   MONTEVIDEO_BIAS,
@@ -60,24 +60,8 @@ function matchesCategory(
   return types.some((t) => allowed.has(t));
 }
 
-/**
- * El resultado tiene que ser la cadena buscada, no cualquier negocio que
- * comparta rubro y esté cerca — probado en vivo: buscar "Soho" también trae
- * restaurantes reales sin ninguna relación ("Su Bar", "Mercado Ferrando").
- * Prefijo normalizado en vez de igualdad exacta porque Google suele nombrar
- * la sucursal como "Marca + local" (ej. "McDonald's Punta Carretas
- * Shopping" para la cadena "McDonald's").
- */
-function matchesChainName(displayName: string, chainName: string): boolean {
-  return normalizeMerchantName(displayName).startsWith(
-    normalizeMerchantName(chainName),
-  );
-}
-
 @Injectable()
-export class GooglePlacesBranchDirectoryProvider
-  implements BranchDirectoryProvider
-{
+export class GooglePlacesBranchDirectoryProvider implements BranchDirectoryProvider {
   private readonly logger = new Logger(
     GooglePlacesBranchDirectoryProvider.name,
   );
@@ -133,18 +117,40 @@ export class GooglePlacesBranchDirectoryProvider
     // Montevideo, tipo de comercio del rubro esperado, y nombre que
     // corresponda a la cadena buscada. Mismo criterio conservador que los
     // scrapers de bancos: mejor faltante que inventado.
-    return (data.places ?? [])
-      .filter((p) => p.displayName?.text && p.formattedAddress && p.location)
-      .filter((p) => isInMontevideo(p.addressComponents))
-      .filter((p) => matchesCategory(p, categoryName))
-      .filter((p) => matchesChainName(p.displayName!.text, chainName))
-      .map((p) => ({
-        name: p.displayName!.text,
-        address: p.formattedAddress!,
-        neighborhood: extractNeighborhood(p.addressComponents),
-        latitude: p.location!.latitude,
-        longitude: p.location!.longitude,
-      }));
+    const complete = (data.places ?? []).filter(
+      (p) => p.displayName?.text && p.formattedAddress && p.location,
+    );
+    const inMontevideo = complete.filter((p) =>
+      isInMontevideo(p.addressComponents),
+    );
+    const rightCategory = inMontevideo.filter((p) =>
+      matchesCategory(p, categoryName),
+    );
+    const rightName = rightCategory.filter((p) =>
+      matchesChainName(p.displayName!.text, chainName),
+    );
+
+    // Sin esto, una cadena que queda sin sucursales es indistinguible de un
+    // comercio que no existe en Montevideo — y es la diferencia entre "no
+    // está" y "lo estamos descartando mal" (bug real: "Bar Facal" moría en
+    // el filtro de nombre).
+    if (rightName.length === 0 && complete.length > 0) {
+      this.logger.debug(
+        `"${chainName}": ${complete.length} resultados, 0 aceptados ` +
+          `(fuera de Montevideo: ${complete.length - inMontevideo.length}, ` +
+          `otro rubro: ${inMontevideo.length - rightCategory.length}, ` +
+          `otro nombre: ${rightCategory.length - rightName.length} ` +
+          `[${rightCategory.map((p) => p.displayName!.text).join(' | ')}])`,
+      );
+    }
+
+    return rightName.map((p) => ({
+      name: p.displayName!.text,
+      address: p.formattedAddress!,
+      neighborhood: extractNeighborhood(p.addressComponents),
+      latitude: p.location!.latitude,
+      longitude: p.location!.longitude,
+    }));
   }
 }
 

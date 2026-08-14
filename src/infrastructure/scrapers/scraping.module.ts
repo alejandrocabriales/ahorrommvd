@@ -27,6 +27,9 @@ import { SantanderBenefitsScraper } from './santander/santander-benefits.scraper
     SyncPromotionsUseCase,
     PromotionsSyncCron,
   ],
-  exports: [SyncPromotionsUseCase],
+  // BANK_SCRAPERS se exporta para el reporte de datos (ReportingModule), que
+  // corre los mismos scrapers en seco — si tuviera su propia lista, el
+  // reporte podría medir algo distinto de lo que el cron ingiere.
+  exports: [SyncPromotionsUseCase, BANK_SCRAPERS],
 })
 export class ScrapingModule {}

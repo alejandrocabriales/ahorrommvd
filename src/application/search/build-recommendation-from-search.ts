@@ -69,5 +69,8 @@ export function buildRecommendationFromSearch(
     // donde el backend elige por él.
     unverifiedOnly: false,
     zoneWidened: false,
+    // Solo aplica al flujo por categoría: acá el usuario preguntó por un
+    // comercio puntual, ofrecerle otro banco no responde lo que preguntó.
+    bestWithOtherBank: null,
   };
 }
