@@ -55,6 +55,22 @@ function otherBankHint(recommendation: Recommendation): string {
   );
 }
 
+/**
+ * Beneficios sin porcentaje con SUS tarjetas (hoy, los 2x1 de Itaú en
+ * heladerías). No pasan por el ranking porque no son comparables con un %,
+ * pero sí son una respuesta válida a "¿qué opciones tengo?" — sobre todo
+ * cuando son lo único que hay.
+ */
+function labeledBenefitsText(recommendation: Recommendation): string {
+  if (recommendation.otherBenefits.length === 0) return '';
+  const items = recommendation.otherBenefits.map((benefit) => {
+    const place = benefit.branchName ?? benefit.merchantChainName;
+    const where = benefit.address ? ` (${benefit.address})` : '';
+    return `${benefit.label} en ${place}${where} con ${benefit.bankName}`;
+  });
+  return ` ${items.join(', y ')}.`;
+}
+
 interface ReplyResult {
   message: string;
   /** null cuando no hubo una Recommendation real que valga la pena recordar (no encontrado, desambiguar, no entendí). */
@@ -410,13 +426,25 @@ export class HandleWhatsAppMessageUseCase {
     if (recommendation.nothingFound && recommendation.unverifiedOnly) {
       // "con tus tarjetas" solo si de verdad filtramos por sus bancos —
       // con showAllBanks la búsqueda fue abierta y decirlo sería falso.
-      const what = categoryName ? `ningún local de ${categoryName}` : 'nada';
+      const what = categoryName
+        ? `ningún descuento de ${categoryName}`
+        : 'nada';
       const cards = filteredByCards ? ' con tus tarjetas' : '';
+      // Si hay beneficios sin % , esos son la respuesta y van adelante:
+      // arrancar con "no tengo nada" y cerrar con "igual tenés un 2x1" se
+      // lee como una contradicción.
+      const opening =
+        recommendation.otherBenefits.length > 0
+          ? `Para ${categoryName ?? 'hoy'}${cards} tengo${labeledBenefitsText(recommendation)} ` +
+            'Descuentos en % no tengo ninguno confirmado en Montevideo hoy: ' +
+            'hay promos vigentes, pero no puedo confirmar que esos comercios ' +
+            'tengan local acá.'
+          : `Hoy no tengo ${what} confirmado en Montevideo${cards}. Hay promos ` +
+            'vigentes, pero no puedo confirmar que esos comercios tengan local ' +
+            'acá, así que no te las recomiendo.';
       return {
         message:
-          `Hoy no tengo ${what} confirmado en Montevideo${cards}. Hay promos ` +
-          'vigentes, pero no puedo confirmar que esos comercios tengan local ' +
-          'acá, así que no te las recomiendo.' +
+          opening +
           otherBankHint(recommendation) +
           ' ¿Querés que mire otra categoría?',
         // Se guarda igual como contexto: no encontramos nada, pero el tema
@@ -429,8 +457,9 @@ export class HandleWhatsAppMessageUseCase {
     if (recommendation.nothingFound) {
       return {
         message:
-          `No encontré promociones vigentes para ${recommendation.queryLabel} ` +
-          `en los próximos 7 días.${otherBankHint(recommendation)}`,
+          `No encontré descuentos vigentes para ${recommendation.queryLabel} ` +
+          `en los próximos 7 días.${labeledBenefitsText(recommendation)}` +
+          otherBankHint(recommendation),
         recommendation,
       };
     }

@@ -34,12 +34,20 @@ function fakeScraper(
   return { bankName, scrape: () => Promise.resolve(promos) };
 }
 
+interface BranchUpsert {
+  where: { merchantChainId_name: { merchantChainId: string; name: string } };
+  create: { name: string; latitude: number; longitude: number };
+  update: { latitude: number; longitude: number };
+}
+
 function buildPrismaMock() {
   let nextChainId = 1;
   const upsertedChains: Array<{ name: string; categoryId: string }> = [];
+  const branchUpserts: BranchUpsert[] = [];
 
   return {
     upsertedChains,
+    branchUpserts,
     merchantChain: {
       findMany: jest.fn().mockResolvedValue([FARMASHOP_CHAIN]),
       upsert: jest
@@ -67,6 +75,12 @@ function buildPrismaMock() {
       deleteMany: jest.fn(),
       createMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
+    branch: {
+      upsert: jest.fn().mockImplementation((args: unknown) => {
+        branchUpserts.push(args as BranchUpsert);
+        return Promise.resolve({});
+      }),
+    },
     $transaction: jest
       .fn()
       .mockImplementation((ops: unknown[]) => Promise.all(ops)),
@@ -85,6 +99,60 @@ describe('SyncPromotionsUseCase', () => {
     expect(result.persisted).toBe(1);
     expect(result.autoCreatedChains).toBe(0);
     expect(prisma.merchantChain.upsert).not.toHaveBeenCalled();
+  });
+
+  it('guarda los locales que publica el propio banco, sin pisar la dirección que ya tenga la sucursal', async () => {
+    const prisma = buildPrismaMock();
+    const useCase = new SyncPromotionsUseCase(prisma as never, [
+      fakeScraper('Itaú', [
+        promo({
+          merchantChainName: 'Farmashop',
+          branches: [
+            { name: 'Farmashop Pocitos', latitude: -34.91, longitude: -56.15 },
+          ],
+        }),
+      ]),
+    ]);
+
+    await useCase.execute();
+
+    expect(prisma.branchUpserts).toEqual([
+      {
+        where: {
+          merchantChainId_name: {
+            merchantChainId: 'chain-farmashop',
+            name: 'Farmashop Pocitos',
+          },
+        },
+        create: {
+          merchantChainId: 'chain-farmashop',
+          name: 'Farmashop Pocitos',
+          latitude: -34.91,
+          longitude: -56.15,
+        },
+        // Sin address/neighborhood: el feed no los trae, y si la sucursal ya
+        // los tiene del backfill de Places no hay con qué mejorarlos.
+        update: { latitude: -34.91, longitude: -56.15 },
+      },
+    ]);
+  });
+
+  it('no guarda locales de una promo cuya cadena no matchea nada', async () => {
+    const prisma = buildPrismaMock();
+    const useCase = new SyncPromotionsUseCase(prisma as never, [
+      fakeScraper('Itaú', [
+        promo({
+          merchantChainName: 'Comercio Desconocido',
+          branches: [
+            { name: 'Local Centro', latitude: -34.9, longitude: -56.18 },
+          ],
+        }),
+      ]),
+    ]);
+
+    await useCase.execute();
+
+    expect(prisma.branchUpserts).toEqual([]);
   });
 
   it('auto-creates a chain when the scraper gives a trustworthy category, and reuses it for repeats in the same run', async () => {

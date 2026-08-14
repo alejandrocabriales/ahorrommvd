@@ -78,7 +78,11 @@ model Promotion {
   id                   String      @id @default(uuid())
   bankId               String      @map("bank_id")
   merchantChainId      String      @map("merchant_chain_id")
-  discountPercentage   Decimal     @map("discount_percentage") @db.Decimal(5, 2)
+  // Opcional porque hay beneficios reales que no son un porcentaje (el 2x1
+  // de Freddo/Las Delicias en el feed de Itaú). En ese caso va benefitLabel
+  // con el texto del banco. Nunca los dos vacíos a la vez.
+  discountPercentage   Decimal?    @map("discount_percentage") @db.Decimal(5, 2)
+  benefitLabel         String?     @map("benefit_label")
   paymentType          PaymentType @map("payment_type")
   cardName             String?     @map("card_name")
   capAmount            Decimal?    @map("cap_amount") @db.Decimal(10, 2)

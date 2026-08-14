@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { BranchCandidate } from '../../domain/branches/branch-candidate';
+import { distanceKm } from '../../domain/geocoding/distance';
 import { BRANCH_DIRECTORY_PROVIDER } from '../../domain/branches/branch-directory-provider.port';
 import type { BranchDirectoryProvider } from '../../domain/branches/branch-directory-provider.port';
 import { ZONE_GEOCODER } from '../../domain/geocoding/zone-geocoder.port';
@@ -11,18 +12,29 @@ export interface ChainBranchSyncResult {
   chainName: string;
   found: number;
   saved: number;
+  /** Sucursales que ya estaban ubicadas y a las que les completamos la dirección con Google. */
+  addressed: number;
   /** Sucursales que ya existían sin coordenadas y a las que se las completamos geocodificando su dirección. */
   geocoded: number;
   error?: string;
 }
 
-/** Sucursal ya cargada que todavía no sirve para recomendar: tiene dirección pero no coordenadas. */
+/** Sucursal ya cargada, con lo que le falte: sin coordenadas (las del seed) o sin dirección (las del feed de un banco). */
 interface ExistingBranch {
   id: string;
   name: string;
   address: string | null;
   latitude: number | null;
+  longitude: number | null;
 }
+
+/**
+ * Dos puntos a menos de esto son el mismo local con distinto nombre — ej.
+ * "Freddo Pocitos" (nombre del feed de Itaú) y "Freddo" (nombre en Google),
+ * a 30 m. Sirve para dos cosas: no duplicar la sucursal, y pegarle la
+ * dirección de Google a la fila que ya teníamos.
+ */
+const SAME_PLACE_KM = 0.12;
 
 /**
  * Backfill de sucursales reales vía Google Places, cadena por cadena.
@@ -62,11 +74,26 @@ export class SyncBranchesUseCase {
 
   async execute(): Promise<ChainBranchSyncResult[]> {
     const chains = await this.prisma.merchantChain.findMany({
-      where: { branches: { none: { latitude: { not: null } } } },
+      where: {
+        OR: [
+          // Sin ninguna sucursal ubicable: hay que salir a buscarlas.
+          { branches: { none: { latitude: { not: null } } } },
+          // Ubicables pero sin dirección: son las que publica el feed del
+          // banco, que da nombre y coordenadas y nada más. Sirven para medir
+          // distancia pero no para decirle al usuario dónde queda.
+          { branches: { some: { address: null } } },
+        ],
+      },
       include: {
         category: true,
         branches: {
-          select: { id: true, name: true, address: true, latitude: true },
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            latitude: true,
+            longitude: true,
+          },
         },
       },
     });
@@ -102,14 +129,24 @@ export class SyncBranchesUseCase {
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(`Places falló para "${chainName}": ${error}`);
-      return { chainName, found: 0, saved: 0, geocoded, error };
+      return { chainName, found: 0, saved: 0, geocoded, addressed: 0, error };
     }
 
     if (candidates.length === 0) {
-      return { chainName, found: 0, saved: 0, geocoded };
+      return { chainName, found: 0, saved: 0, geocoded, addressed: 0 };
     }
 
-    const named = dedupeNames(candidates);
+    // Antes de guardar nada: completar la dirección de las sucursales que ya
+    // teníamos ubicadas pero sin dirección (las que publica el feed de un
+    // banco, que solo da nombre y coordenadas).
+    const addressed = await this.fillAddresses(existing, candidates);
+
+    // Un resultado de Google que cae encima de una sucursal que ya tenemos
+    // es la misma, con otro nombre — guardarla duplicaría el local.
+    const fresh = candidates.filter(
+      (candidate) => !matchExisting(existing, candidate),
+    );
+    const named = dedupeNames(fresh);
 
     // Upsert y no createMany: el unique es (merchantChainId, name), así que
     // una corrida repetida completa/corrige la fila que ya estaba en vez de
@@ -142,14 +179,42 @@ export class SyncBranchesUseCase {
 
     this.logger.log(
       `${chainName}: ${candidates.length} encontradas, ${named.length} guardadas` +
-        (geocoded > 0 ? `, ${geocoded} geocodificadas` : ''),
+        (geocoded > 0 ? `, ${geocoded} geocodificadas` : '') +
+        (addressed > 0 ? `, ${addressed} con dirección nueva` : ''),
     );
     return {
       chainName,
+      addressed,
       found: candidates.length,
       saved: named.length,
       geocoded,
     };
+  }
+
+  /**
+   * Al revés que `geocodeExisting`: la sucursal ya está ubicada pero no
+   * sabemos su dirección (feed del banco). Si Google tiene un local de la
+   * cadena encima de esas coordenadas, le pegamos su dirección — sin eso, la
+   * respuesta puede decir "Freddo Pocitos" pero no en qué calle, que es
+   * justo lo que el usuario pidió que no pase.
+   */
+  private async fillAddresses(
+    existing: ExistingBranch[],
+    candidates: BranchCandidate[],
+  ): Promise<number> {
+    let addressed = 0;
+    for (const branch of existing) {
+      if (branch.address || branch.latitude === null) continue;
+      const match = candidateAt(branch, candidates);
+      if (!match) continue;
+
+      await this.prisma.branch.update({
+        where: { id: branch.id },
+        data: { address: match.address, neighborhood: match.neighborhood },
+      });
+      addressed++;
+    }
+    return addressed;
   }
 
   /**
@@ -184,6 +249,28 @@ export class SyncBranchesUseCase {
     }
     return geocoded;
   }
+}
+
+/** El resultado de Google que cae encima de esta sucursal, si hay alguno. */
+function candidateAt(
+  branch: ExistingBranch,
+  candidates: BranchCandidate[],
+): BranchCandidate | undefined {
+  if (branch.latitude === null || branch.longitude === null) return undefined;
+  const point = { latitude: branch.latitude, longitude: branch.longitude };
+  return candidates.find(
+    (c) =>
+      distanceKm(point, { latitude: c.latitude, longitude: c.longitude }) <=
+      SAME_PLACE_KM,
+  );
+}
+
+/** La sucursal que ya tenemos en el mismo lugar que este resultado de Google, si hay alguna. */
+function matchExisting(
+  existing: ExistingBranch[],
+  candidate: BranchCandidate,
+): ExistingBranch | undefined {
+  return existing.find((branch) => candidateAt(branch, [candidate]));
 }
 
 /**

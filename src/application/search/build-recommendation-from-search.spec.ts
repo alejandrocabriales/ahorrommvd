@@ -86,7 +86,12 @@ describe('buildRecommendationFromSearch', () => {
       resolved({
         today: PROMO,
         better: {
-          promotion: { ...PROMO, bankName: 'OCA', discountPercentage: 40, capAmount: 2000 },
+          promotion: {
+            ...PROMO,
+            bankName: 'OCA',
+            discountPercentage: 40,
+            capAmount: 2000,
+          },
           daysFromNow: 1,
         },
       }),
@@ -94,7 +99,10 @@ describe('buildRecommendationFromSearch', () => {
       4000,
     );
 
-    expect(rec.betterSoon?.estimatedSaving).toEqual({ amount: 1600, cappedByBank: false });
+    expect(rec.betterSoon?.estimatedSaving).toEqual({
+      amount: 1600,
+      cappedByBank: false,
+    });
   });
 
   it('respects the cap on the betterSoon estimate too', () => {
@@ -102,7 +110,12 @@ describe('buildRecommendationFromSearch', () => {
       resolved({
         today: PROMO,
         better: {
-          promotion: { ...PROMO, bankName: 'OCA', discountPercentage: 40, capAmount: 800 },
+          promotion: {
+            ...PROMO,
+            bankName: 'OCA',
+            discountPercentage: 40,
+            capAmount: 800,
+          },
           daysFromNow: 1,
         },
       }),
@@ -110,7 +123,10 @@ describe('buildRecommendationFromSearch', () => {
       4000,
     );
 
-    expect(rec.betterSoon?.estimatedSaving).toEqual({ amount: 800, cappedByBank: true });
+    expect(rec.betterSoon?.estimatedSaving).toEqual({
+      amount: 800,
+      cappedByBank: true,
+    });
   });
 
   it('only carries a $ estimate when the backend actually computed one from a real amount', () => {
@@ -193,7 +209,10 @@ describe('buildRecommendationFromSearch', () => {
   });
 
   it('threads asksLocation through, defaulting to false', () => {
-    const withoutFlag = buildRecommendationFromSearch(resolved({ today: PROMO }), null);
+    const withoutFlag = buildRecommendationFromSearch(
+      resolved({ today: PROMO }),
+      null,
+    );
     const withFlag = buildRecommendationFromSearch(
       resolved({ today: PROMO }),
       null,

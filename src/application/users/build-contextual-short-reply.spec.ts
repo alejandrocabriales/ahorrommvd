@@ -82,6 +82,7 @@ const BASE: Recommendation = {
   unverifiedOnly: false,
   zoneWidened: false,
   bestWithOtherBank: null,
+  otherBenefits: [],
 };
 
 describe('buildContextualShortReply', () => {

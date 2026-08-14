@@ -25,6 +25,7 @@
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "scrape:run": "npm run build && node dist/src/infrastructure/scrapers/scrape-promotions.script.js",
+    "scrape:run:prod": "npm run build && node dist/src/infrastructure/scrapers/scrape-promotions.script.js --prod",
     "branches:sync:local": "npm run build && node dist/src/infrastructure/places/sync-branches.script.js",
     "branches:sync:prod": "npm run build && node dist/src/infrastructure/places/sync-branches.script.js --prod",
     "data:report": "npm run build && node dist/src/infrastructure/reporting/data-report.script.js",

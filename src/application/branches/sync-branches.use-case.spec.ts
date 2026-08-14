@@ -13,6 +13,7 @@ interface FakeChain {
     name: string;
     address: string | null;
     latitude: number | null;
+    longitude: number | null;
   }>;
 }
 
@@ -67,9 +68,15 @@ function fakeGeocoder(
 function buildPrismaMock(chains: FakeChain[] = CHAINS) {
   const upserts: Array<{ chainId: string; name: string }> = [];
   const updates: Array<{ id: string; latitude: number }> = [];
+  const addressUpdates: Array<{
+    id: string;
+    address: string;
+    neighborhood: string | null;
+  }> = [];
   return {
     upserts,
     updates,
+    addressUpdates,
     merchantChain: { findMany: jest.fn().mockResolvedValue(chains) },
     branch: {
       upsert: jest.fn(
@@ -88,9 +95,25 @@ function buildPrismaMock(chains: FakeChain[] = CHAINS) {
       update: jest.fn(
         (args: {
           where: { id: string };
-          data: { latitude: number; longitude: number };
+          data: {
+            latitude?: number;
+            longitude?: number;
+            address?: string;
+            neighborhood?: string | null;
+          };
         }) => {
-          updates.push({ id: args.where.id, latitude: args.data.latitude });
+          if (args.data.address !== undefined) {
+            addressUpdates.push({
+              id: args.where.id,
+              address: args.data.address,
+              neighborhood: args.data.neighborhood ?? null,
+            });
+          } else {
+            updates.push({
+              id: args.where.id,
+              latitude: args.data.latitude as number,
+            });
+          }
           return Promise.resolve({});
         },
       ),
@@ -110,11 +133,22 @@ describe('SyncBranchesUseCase', () => {
     await useCase.execute();
 
     expect(prisma.merchantChain.findMany).toHaveBeenCalledWith({
-      where: { branches: { none: { latitude: { not: null } } } },
+      where: {
+        OR: [
+          { branches: { none: { latitude: { not: null } } } },
+          { branches: { some: { address: null } } },
+        ],
+      },
       include: {
         category: true,
         branches: {
-          select: { id: true, name: true, address: true, latitude: true },
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            latitude: true,
+            longitude: true,
+          },
         },
       },
     });
@@ -138,8 +172,8 @@ describe('SyncBranchesUseCase', () => {
     const results = await useCase.execute();
 
     expect(results).toEqual([
-      { chainName: 'Ta-Ta', found: 2, saved: 2, geocoded: 0 },
-      { chainName: 'Chajá', found: 0, saved: 0, geocoded: 0 },
+      { chainName: 'Ta-Ta', found: 2, saved: 2, geocoded: 0, addressed: 0 },
+      { chainName: 'Chajá', found: 0, saved: 0, geocoded: 0, addressed: 0 },
     ]);
     expect(prisma.upserts).toEqual([
       { chainId: 'chain-tata', name: 'Ta-Ta Pocitos' },
@@ -184,12 +218,14 @@ describe('SyncBranchesUseCase', () => {
             name: 'Ta-Ta Pocitos',
             address: 'Av. Brasil 2846',
             latitude: null,
+            longitude: null,
           },
           {
             id: 'branch-2',
             name: 'Ta-Ta Sin Dirección',
             address: null,
             latitude: null,
+            longitude: null,
           },
         ],
       },
@@ -220,6 +256,7 @@ describe('SyncBranchesUseCase', () => {
             name: 'Ta-Ta Pocitos',
             address: 'Dirección inventada',
             latitude: null,
+            longitude: null,
           },
         ],
       },
@@ -237,6 +274,94 @@ describe('SyncBranchesUseCase', () => {
 
     expect(prisma.updates).toEqual([]);
     expect(results[0].geocoded).toBe(0);
+  });
+
+  it('le completa la dirección a una sucursal que vino del feed del banco (nombre y coordenadas, sin calle)', async () => {
+    const prisma = buildPrismaMock([
+      {
+        id: 'chain-freddo',
+        name: 'Freddo',
+        category: { name: 'Restaurantes' },
+        branches: [
+          {
+            id: 'branch-1',
+            name: 'Freddo Pocitos',
+            address: null,
+            latitude: -34.91605,
+            longitude: -56.15886,
+          },
+        ],
+      },
+    ]);
+    const useCase = new SyncBranchesUseCase(
+      prisma as never,
+      fakeProvider({
+        // Mismo local, a ~30 m y con otro nombre en Google.
+        Freddo: [
+          candidate({
+            name: 'Freddo',
+            address: '21 de Setiembre 2997, Montevideo',
+            neighborhood: 'Pocitos',
+            latitude: -34.9163,
+            longitude: -56.159,
+          }),
+        ],
+      }),
+      fakeGeocoder(),
+    );
+
+    const results = await useCase.execute();
+
+    expect(prisma.addressUpdates).toEqual([
+      {
+        id: 'branch-1',
+        address: '21 de Setiembre 2997, Montevideo',
+        neighborhood: 'Pocitos',
+      },
+    ]);
+    expect(results[0].addressed).toBe(1);
+    // Y no la guarda otra vez con el nombre de Google: es el mismo local.
+    expect(prisma.upserts).toEqual([]);
+    expect(results[0].saved).toBe(0);
+  });
+
+  it('sí guarda un local de Google que no está encima de ninguno que ya tengamos', async () => {
+    const prisma = buildPrismaMock([
+      {
+        id: 'chain-freddo',
+        name: 'Freddo',
+        category: { name: 'Restaurantes' },
+        branches: [
+          {
+            id: 'branch-1',
+            name: 'Freddo Pocitos',
+            address: 'Ya tiene dirección',
+            latitude: -34.91605,
+            longitude: -56.15886,
+          },
+        ],
+      },
+    ]);
+    const useCase = new SyncBranchesUseCase(
+      prisma as never,
+      fakeProvider({
+        Freddo: [
+          candidate({
+            name: 'Freddo Carrasco',
+            latitude: -34.8885,
+            longitude: -56.0583,
+          }),
+        ],
+      }),
+      fakeGeocoder(),
+    );
+
+    const results = await useCase.execute();
+
+    expect(prisma.upserts).toEqual([
+      { chainId: 'chain-freddo', name: 'Freddo Carrasco' },
+    ]);
+    expect(results[0].addressed).toBe(0);
   });
 
   it('registra el error de una cadena cuya búsqueda falla, sin romper el resto', async () => {
@@ -258,6 +383,7 @@ describe('SyncBranchesUseCase', () => {
       found: 0,
       saved: 0,
       geocoded: 0,
+      addressed: 0,
       error: 'Places API respondió 500: boom',
     });
     expect(results[1]).toEqual({
@@ -265,6 +391,7 @@ describe('SyncBranchesUseCase', () => {
       found: 1,
       saved: 1,
       geocoded: 0,
+      addressed: 0,
     });
   });
 });

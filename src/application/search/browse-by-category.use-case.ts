@@ -3,9 +3,11 @@ import { PrismaService } from '../../infrastructure/prisma/prisma.service';
 import { MvpCategoryName } from '../../domain/scraping/mvp-category';
 import { PromotionSummary } from '../../domain/search/search-result';
 import {
+  LabeledBenefit,
   Recommendation,
   RecommendationOption,
 } from '../../domain/recommendation/recommendation';
+import { shortAddress } from '../../domain/branches/short-address';
 import { distanceKm } from '../../domain/geocoding/distance';
 import { GeoPoint } from '../../domain/geocoding/geo-point';
 import { ZONE_GEOCODER } from '../../domain/geocoding/zone-geocoder.port';
@@ -44,6 +46,19 @@ interface CategoryCandidate extends PromotionSummary {
   /** Sucursales de la cadena confirmadas en Montevideo con coordenadas — [] si no hay ninguna, y ahí la cadena no se recomienda. */
   branches: VerifiedBranch[];
 }
+
+/** Beneficio sin porcentaje (ej. "2x1 en helados"): mismo estándar de sucursal, pero fuera del ranking. */
+interface LabeledCandidate {
+  merchantChainName: string;
+  bankName: string;
+  label: string;
+  validFrom: Date;
+  validUntil: Date;
+  branches: VerifiedBranch[];
+}
+
+/** Cuántos beneficios sin % ofrecemos: son un extra, no la respuesta. */
+const MAX_OTHER_BENEFITS = 2;
 
 function bestPerChain(candidates: CategoryCandidate[]): CategoryCandidate[] {
   const byChain = new Map<string, CategoryCandidate>();
@@ -123,8 +138,8 @@ export class BrowseByCategoryUseCase {
       },
     });
 
-    const candidatesRaw: CategoryCandidate[] = promotions.map((p) => {
-      const branches: VerifiedBranch[] = p.merchantChain.branches
+    const branchesOf = (p: (typeof promotions)[number]): VerifiedBranch[] =>
+      p.merchantChain.branches
         .filter((b) => b.latitude !== null && b.longitude !== null)
         .map((b) => ({
           name: b.name,
@@ -132,7 +147,10 @@ export class BrowseByCategoryUseCase {
           address: b.address,
           point: { latitude: b.latitude!, longitude: b.longitude! },
         }));
-      return {
+
+    const candidatesRaw: CategoryCandidate[] = promotions
+      .filter((p) => p.discountPercentage !== null)
+      .map((p) => ({
         merchantChainId: p.merchantChainId,
         merchantChainName: p.merchantChain.name,
         bankName: p.bank.name,
@@ -143,14 +161,30 @@ export class BrowseByCategoryUseCase {
         validFrom: p.validFrom,
         validUntil: p.validUntil,
         sourceUrl: p.sourceUrl,
-        branches,
-      };
-    });
+        branches: branchesOf(p),
+      }));
+
+    // Beneficios que no son un % (hoy: los 2x1 de Freddo y Las Delicias en
+    // Itaú). Van por su propio carril: un 2x1 no se puede ordenar contra un
+    // 25% sin inventar una equivalencia, así que nunca compiten por
+    // "bestToday" — se ofrecen aparte.
+    const labeledRaw: LabeledCandidate[] = promotions
+      .filter((p) => p.benefitLabel !== null && p.discountPercentage === null)
+      .map((p) => ({
+        merchantChainName: p.merchantChain.name,
+        bankName: p.bank.name,
+        label: p.benefitLabel!,
+        validFrom: p.validFrom,
+        validUntil: p.validUntil,
+        branches: branchesOf(p),
+      }));
 
     const zonePoint = await this.geocodeZone(zone);
-    const mine = allowedBankNames
-      ? candidatesRaw.filter((c) => allowedBankNames.has(c.bankName))
-      : candidatesRaw;
+    const mineOf = <T extends { bankName: string }>(list: T[]): T[] =>
+      allowedBankNames
+        ? list.filter((c) => allowedBankNames.has(c.bankName))
+        : list;
+    const mine = mineOf(candidatesRaw);
     const { candidates, verified, zoneWidened } = selectRecommendable(
       mine,
       zonePoint,
@@ -208,6 +242,11 @@ export class BrowseByCategoryUseCase {
       // confirmado igual que el resto — decirlo es más útil que un "no
       // tengo nada" seco, y no es una recomendación: no puede usarla salvo
       // que tenga esa tarjeta.
+      otherBenefits: this.toLabeledBenefits(
+        mineOf(labeledRaw),
+        zonePoint,
+        today,
+      ),
       bestWithOtherBank:
         nothingFound && allowedBankNames
           ? this.bestOutsideMyBanks(
@@ -222,6 +261,37 @@ export class BrowseByCategoryUseCase {
       // categoría no hay un único lugar que señalar.
       asksLocation: false,
     };
+  }
+
+  /**
+   * Beneficios sin % vigentes hoy, con el mismo estándar de ubicación que
+   * una recomendación (sucursal verificada, y cerca si sabemos el barrio).
+   * No se ordenan por "mejor" — no hay con qué — así que salen los más
+   * cercanos primero cuando conocemos el barrio.
+   */
+  private toLabeledBenefits(
+    all: LabeledCandidate[],
+    zonePoint: GeoPoint | null,
+    today: Date,
+  ): LabeledBenefit[] {
+    const dayStart = startOfDay(today);
+    const dayEnd = endOfDay(today);
+    const activeToday = all.filter(
+      (c) => c.validFrom <= dayEnd && c.validUntil >= dayStart,
+    );
+    const { candidates } = selectRecommendable(activeToday, zonePoint);
+
+    return candidates.slice(0, MAX_OTHER_BENEFITS).map((candidate) => {
+      const branch = nearestBranch(candidate.branches, zonePoint);
+      return {
+        merchantChainName: candidate.merchantChainName,
+        branchName: branch?.name ?? null,
+        neighborhood: branch?.neighborhood ?? null,
+        address: shortAddress(branch?.address ?? null),
+        bankName: candidate.bankName,
+        label: candidate.label,
+      };
+    });
   }
 
   /**
@@ -292,12 +362,12 @@ export class BrowseByCategoryUseCase {
  * queda marcado para que la respuesta lo diga en vez de hacerlo pasar por
  * "cerca tuyo".
  */
-function selectRecommendable(
-  all: CategoryCandidate[],
+function selectRecommendable<T extends { branches: VerifiedBranch[] }>(
+  all: T[],
   zonePoint: GeoPoint | null,
 ): {
-  candidates: CategoryCandidate[];
-  verified: CategoryCandidate[];
+  candidates: T[];
+  verified: T[];
   zoneWidened: boolean;
 } {
   const verified = all.filter((c) => c.branches.length > 0);

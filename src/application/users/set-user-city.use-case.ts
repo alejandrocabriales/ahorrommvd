@@ -19,7 +19,10 @@ export interface SetUserCityResult {
 export class SetUserCityUseCase {
   constructor(private readonly prisma: PrismaService) {}
 
-  async execute(whatsapp: string, city: string): Promise<SetUserCityResult | null> {
+  async execute(
+    whatsapp: string,
+    city: string,
+  ): Promise<SetUserCityResult | null> {
     if (normalizeMerchantName(city) === normalizeMerchantName('Montevideo')) {
       return null;
     }

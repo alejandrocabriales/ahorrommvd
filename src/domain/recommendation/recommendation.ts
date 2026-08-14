@@ -18,6 +18,22 @@ export interface RecommendationOption {
   cardName: string | null;
 }
 
+/**
+ * Beneficio real que no es un porcentaje — hoy, los 2x1 que Itaú publica en
+ * heladerías. No entra al ranking de `bestToday` a propósito: un 2x1 no se
+ * puede ordenar contra un 25% sin inventar una equivalencia (depende de qué
+ * lleve el usuario). Se ofrece como lo que es, con el texto del banco.
+ */
+export interface LabeledBenefit {
+  merchantChainName: string;
+  branchName: string | null;
+  neighborhood: string | null;
+  address: string | null;
+  bankName: string;
+  /** Tal cual lo publica el banco: "2x1 en helados de litro y cucuruchos grandes". */
+  label: string;
+}
+
 export interface BetterSoon {
   option: RecommendationOption;
   daysFromNow: number;
@@ -73,6 +89,12 @@ export interface Recommendation {
    * `bestToday`.
    */
   bestWithOtherBank: RecommendationOption | null;
+  /**
+   * Beneficios vigentes hoy que no son un %, con sus tarjetas y con local
+   * confirmado cerca. Van aparte de `bestToday`/`alternatives` porque no
+   * compiten con un porcentaje. Vacío en la búsqueda por comercio puntual.
+   */
+  otherBenefits: LabeledBenefit[];
   /**
    * true si sabíamos el barrio del usuario pero ninguna sucursal
    * verificada queda dentro del radio de cercanía — lo que ofrecemos está

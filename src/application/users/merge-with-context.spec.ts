@@ -47,6 +47,7 @@ const FARMACIAS_RECOMMENDATION: Recommendation = {
   unverifiedOnly: false,
   zoneWidened: false,
   bestWithOtherBank: null,
+  otherBenefits: [],
 };
 
 function contextAt(
