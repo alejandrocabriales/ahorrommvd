@@ -348,7 +348,11 @@ export class HandleWhatsAppMessageUseCase {
         filterUserId,
         query.amount ?? undefined,
       );
-      return this.respondToRecommendation(recommendation);
+      return this.respondToRecommendation(
+        recommendation,
+        query.categoryName,
+        Boolean(filterUserId),
+      );
     }
 
     if (query.wantsGeneralSavings || query.zone) {
@@ -362,7 +366,11 @@ export class HandleWhatsAppMessageUseCase {
         filterUserId,
         query.amount ?? undefined,
       );
-      return this.respondToRecommendation(recommendation);
+      return this.respondToRecommendation(
+        recommendation,
+        null,
+        Boolean(filterUserId),
+      );
     }
 
     return { message: CANT_UNDERSTAND_MESSAGE, recommendation: null };
@@ -371,7 +379,28 @@ export class HandleWhatsAppMessageUseCase {
   /** Response Generator solo entra en juego cuando hay algo real que recomendar — nada que redactar si no hay data. */
   private async respondToRecommendation(
     recommendation: Recommendation,
+    categoryName: string | null,
+    filteredByCards: boolean,
   ): Promise<ReplyResult> {
+    // Sí hay promos vigentes, pero ninguna en un comercio que podamos
+    // confirmar en Montevideo — lo decimos tal cual en vez de ofrecerlas
+    // igual con un "fijate antes de ir" (bug real: Soho/Punta del Este y
+    // Chajá ofrecidos a un usuario Itaú+OCA que preguntó dónde comer). No
+    // pasa por el Response Generator a propósito: con una IA redactando
+    // esto, "no tengo nada" tiende a convertirse en una recomendación tibia.
+    if (recommendation.nothingFound && recommendation.unverifiedOnly) {
+      // "con tus tarjetas" solo si de verdad filtramos por sus bancos —
+      // con showAllBanks la búsqueda fue abierta y decirlo sería falso.
+      const what = categoryName ? `ningún local de ${categoryName}` : 'nada';
+      const cards = filteredByCards ? ' con tus tarjetas' : '';
+      return {
+        message:
+          `Hoy no tengo ${what} confirmado en Montevideo${cards}. Hay promos ` +
+          'vigentes, pero no puedo confirmar que esos comercios tengan local ' +
+          'acá, así que no te las recomiendo. ¿Querés que mire otra categoría?',
+        recommendation: null,
+      };
+    }
     if (recommendation.nothingFound) {
       return {
         message: `No encontré promociones vigentes para ${recommendation.queryLabel} en los próximos 7 días.`,
@@ -406,13 +435,36 @@ export class HandleWhatsAppMessageUseCase {
       };
     }
 
+    // "¿dónde queda X?" cuando no tenemos NINGUNA sucursal de X cargada
+    // (resuelto a nivel cadena, sin branchId): no hay dirección que dar y
+    // tampoco sabemos que la cadena tenga un local acá. Va sin IA a
+    // propósito — redactando, "no tengo la dirección" se le convierte en
+    // "aplica en cualquier local, buscá el más cercano", que es afirmar que
+    // esos locales existen (bug real: "donde queda Soho?" contestado así,
+    // cuando el bar está en Punta del Este).
+    if (asksLocation && !result.branchId) {
+      return {
+        message:
+          `No tengo ninguna sucursal de ${result.merchantChainName} cargada, así que ` +
+          'no te puedo decir dónde queda ni confirmarte que tenga local en ' +
+          'Montevideo. ¿Querés que busque otra opción?',
+        recommendation: null,
+      };
+    }
+
     const recommendation = buildRecommendationFromSearch(
       result,
       zone,
       amount ?? null,
       asksLocation,
     );
-    const built = await this.respondToRecommendation(recommendation);
+    // Comercio puntual: `unverifiedOnly` siempre viene en false (el usuario
+    // eligió el comercio), así que la rama de "nada confirmado" no aplica acá.
+    const built = await this.respondToRecommendation(
+      recommendation,
+      null,
+      false,
+    );
     let message = built.message;
 
     // Registro opcional de gasto (spec): si el usuario ya mandó comercio +

@@ -8,9 +8,17 @@ import { BrowseByCategoryUseCase } from './browse-by-category.use-case';
 // importa dónde exactamente — cerca del centro de Montevideo.
 const MONTEVIDEO_POINT: GeoPoint = { latitude: -34.9, longitude: -56.16 };
 
+interface FakeBranchRow {
+  name: string;
+  neighborhood: string | null;
+  address: string;
+  latitude: number;
+  longitude: number;
+}
+
 interface FakePromoRow {
   merchantChainId: string;
-  merchantChain: { name: string; branches: GeoPoint[] };
+  merchantChain: { name: string; branches: FakeBranchRow[] };
   bank: { name: string };
   discountPercentage: number;
   paymentType: PaymentType;
@@ -21,6 +29,20 @@ interface FakePromoRow {
   sourceUrl: string;
 }
 
+function branch(
+  point: GeoPoint,
+  name = 'Sucursal',
+  neighborhood: string | null = null,
+): FakeBranchRow {
+  return {
+    name,
+    neighborhood,
+    address: `${name}, Montevideo`,
+    latitude: point.latitude,
+    longitude: point.longitude,
+  };
+}
+
 function row(
   overrides: Partial<Omit<FakePromoRow, 'merchantChain'>> & {
     merchantChainId: string;
@@ -29,16 +51,25 @@ function row(
     hasVerifiedBranch?: boolean;
     /** coordenada puntual de la sucursal, para tests de distancia — implica hasVerifiedBranch. */
     branchPoint?: GeoPoint;
+    /** sucursales completas, para tests que miran nombre/barrio/dirección. */
+    branches?: FakeBranchRow[];
   },
 ): FakePromoRow {
   const today = new Date();
-  const { merchantChainName, hasVerifiedBranch, branchPoint, ...rest } =
-    overrides;
-  const branches = branchPoint
-    ? [branchPoint]
-    : hasVerifiedBranch === false
-      ? []
-      : [MONTEVIDEO_POINT];
+  const {
+    merchantChainName,
+    hasVerifiedBranch,
+    branchPoint,
+    branches: branchRows,
+    ...rest
+  } = overrides;
+  const branches =
+    branchRows ??
+    (branchPoint
+      ? [branch(branchPoint, merchantChainName)]
+      : hasVerifiedBranch === false
+        ? []
+        : [branch(MONTEVIDEO_POINT, merchantChainName)]);
   return {
     bank: { name: 'Itaú' },
     discountPercentage: 10,
@@ -324,10 +355,10 @@ describe('BrowseByCategoryUseCase', () => {
 
     expect(rec.bestToday?.merchantChainName).toBe('La Pasiva Arocena');
     expect(rec.alternatives).toEqual([]);
-    expect(rec.locationUnverified).toBe(false);
+    expect(rec.unverifiedOnly).toBe(false);
   });
 
-  it('falls back to unverified candidates when nothing in the category has a verified branch yet (never show "nothing found" when there are real promos), and flags the recommendation as unverified', async () => {
+  it('recommends nothing (not the unverified chain) when no chain in the category has a verified Montevideo branch, and says why with unverifiedOnly', async () => {
     const prisma = buildPrisma([
       row({
         merchantChainId: 'c1',
@@ -340,12 +371,26 @@ describe('BrowseByCategoryUseCase', () => {
 
     const rec = await useCase.execute('Restaurantes', null, undefined);
 
-    expect(rec.bestToday?.merchantChainName).toBe('Bardo');
-    expect(rec.nothingFound).toBe(false);
-    expect(rec.locationUnverified).toBe(true);
+    expect(rec.bestToday).toBeNull();
+    expect(rec.alternatives).toEqual([]);
+    expect(rec.nothingFound).toBe(true);
+    expect(rec.unverifiedOnly).toBe(true);
   });
 
-  it('flags locationUnverified even when the unverified chain wins for a real reason — nothing verified survives the bank filter (bug found live: Itaú+OCA user, Soho/Chajá the only Restaurantes promos for those banks)', async () => {
+  it('keeps unverifiedOnly false when there was simply nothing in the window (no promos at all is a different answer than "nothing confirmed in Montevideo")', async () => {
+    const prisma = buildPrisma([]);
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(),
+    );
+
+    const rec = await useCase.execute('Restaurantes', null, undefined);
+
+    expect(rec.nothingFound).toBe(true);
+    expect(rec.unverifiedOnly).toBe(false);
+  });
+
+  it('recommends nothing when nothing verified survives the bank filter (bug found live: Itaú+OCA user asked where to eat, got Soho/Punta del Este and Chajá)', async () => {
     // La query real filtra por banco en el WHERE — acá simulamos lo que
     // Postgres ya devolvería filtrado (Porto Vanila, Santander-only, ni
     // siquiera llega): confirmamos el WHERE por separado más abajo.
@@ -379,8 +424,10 @@ describe('BrowseByCategoryUseCase', () => {
         }),
       }),
     );
-    expect(rec.bestToday?.merchantChainName).toBe('Soho');
-    expect(rec.locationUnverified).toBe(true);
+    expect(rec.bestToday).toBeNull();
+    expect(rec.alternatives).toEqual([]);
+    expect(rec.nothingFound).toBe(true);
+    expect(rec.unverifiedOnly).toBe(true);
   });
 
   it('passes the query label and zone through untouched, and never invents a "neighborhood" without real branch data', async () => {
@@ -446,7 +493,7 @@ describe('BrowseByCategoryUseCase', () => {
     expect(rec.alternatives).toEqual([]);
   });
 
-  it('falls back to all verified candidates when none are within range of the geocoded zone (better than showing nothing)', async () => {
+  it('falls back to all verified candidates when none are within range of the geocoded zone, flagging zoneWidened so the reply admits it is not nearby', async () => {
     const barrioSur: GeoPoint = { latitude: -34.9108776, longitude: -56.1881819 };
     const pocitos: GeoPoint = { latitude: -34.9085301, longitude: -56.1504057 };
 
@@ -467,5 +514,43 @@ describe('BrowseByCategoryUseCase', () => {
 
     expect(rec.bestToday?.merchantChainName).toBe('Restaurante en Pocitos');
     expect(rec.nothingFound).toBe(false);
+    expect(rec.zoneWidened).toBe(true);
+  });
+
+  it('names the branch closest to the geocoded zone, so the reply can say where to go instead of talking about the chain in the abstract', async () => {
+    const pocitos: GeoPoint = { latitude: -34.9085301, longitude: -56.1504057 };
+    const cercaDePocitos: GeoPoint = {
+      latitude: -34.9105,
+      longitude: -56.1535,
+    };
+
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Farmashop',
+        discountPercentage: 25,
+        branches: [
+          branch(
+            { latitude: -34.8841377, longitude: -56.1696498 },
+            'Farmashop Prado',
+            'Prado',
+          ),
+          branch(cercaDePocitos, 'Farmashop 21 de Setiembre', 'Pocitos'),
+        ],
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(pocitos),
+    );
+
+    const rec = await useCase.execute('Farmacias', 'Pocitos', undefined);
+
+    expect(rec.bestToday).toMatchObject({
+      branchName: 'Farmashop 21 de Setiembre',
+      neighborhood: 'Pocitos',
+      address: 'Farmashop 21 de Setiembre, Montevideo',
+    });
+    expect(rec.zoneWidened).toBe(false);
   });
 });

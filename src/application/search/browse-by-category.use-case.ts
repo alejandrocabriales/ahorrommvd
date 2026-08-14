@@ -27,13 +27,19 @@ const MAX_ALTERNATIVES = 3;
 // en Pocitos si estoy en Barrio Sur").
 const NEARBY_RADIUS_KM = 2.5;
 
+/** Sucursal real y ubicable de una cadena — viene del backfill de Google Places (ver `SyncBranchesUseCase`), no de un scraper. */
+interface VerifiedBranch {
+  name: string;
+  neighborhood: string | null;
+  address: string | null;
+  point: GeoPoint;
+}
+
 interface CategoryCandidate extends PromotionSummary {
   merchantChainId: string;
   merchantChainName: string;
-  /** true si la cadena tiene al menos una `Branch` verificada por el backfill de Google Places (ver `SyncBranchesUseCase`) — es decir, confirmada en Montevideo, no solo "no chequeada todavía". */
-  hasVerifiedMontevideoBranch: boolean;
-  /** Coordenadas de las sucursales verificadas de esta cadena — [] si no hay ninguna. */
-  branchPoints: GeoPoint[];
+  /** Sucursales de la cadena confirmadas en Montevideo con coordenadas — [] si no hay ninguna, y ahí la cadena no se recomienda. */
+  branches: VerifiedBranch[];
 }
 
 function bestPerChain(candidates: CategoryCandidate[]): CategoryCandidate[] {
@@ -99,16 +105,29 @@ export class BrowseByCategoryUseCase {
         bank: true,
         merchantChain: {
           include: {
-            branches: { select: { latitude: true, longitude: true } },
+            branches: {
+              select: {
+                name: true,
+                neighborhood: true,
+                address: true,
+                latitude: true,
+                longitude: true,
+              },
+            },
           },
         },
       },
     });
 
     const candidatesRaw: CategoryCandidate[] = promotions.map((p) => {
-      const branchPoints: GeoPoint[] = p.merchantChain.branches
+      const branches: VerifiedBranch[] = p.merchantChain.branches
         .filter((b) => b.latitude !== null && b.longitude !== null)
-        .map((b) => ({ latitude: b.latitude!, longitude: b.longitude! }));
+        .map((b) => ({
+          name: b.name,
+          neighborhood: b.neighborhood,
+          address: b.address,
+          point: { latitude: b.latitude!, longitude: b.longitude! },
+        }));
       return {
         merchantChainId: p.merchantChainId,
         merchantChainName: p.merchantChain.name,
@@ -120,24 +139,34 @@ export class BrowseByCategoryUseCase {
         validFrom: p.validFrom,
         validUntil: p.validUntil,
         sourceUrl: p.sourceUrl,
-        hasVerifiedMontevideoBranch: branchPoints.length > 0,
-        branchPoints,
+        branches,
       };
     });
 
-    // Por default recomendamos solo cadenas con sucursal verificada en
-    // Montevideo (spec: "Zona: Montevideo únicamente") — bug real encontrado
-    // en vivo: "Soho" ganaba una recomendación de restaurante para "Barrio
-    // Sur" con el % más alto sin que nada supiera que el bar real está en
-    // Punta del Este. Si ninguna cadena tiene sucursal verificada todavía
-    // (categoría recién scrapeada, backfill no corrió aún) mostramos todo
-    // sin filtrar — mejor una recomendación sin verificar que "no encontré
-    // nada" cuando en realidad sí hay promos.
-    const verified = candidatesRaw.filter((c) => c.hasVerifiedMontevideoBranch);
-    const candidates = await this.filterByProximity(
-      verified.length > 0 ? verified : candidatesRaw,
-      zone,
-    );
+    // Solo recomendamos cadenas con sucursal verificada en Montevideo (spec:
+    // "Zona: Montevideo únicamente"). Si ninguna la tiene, NO hay
+    // recomendación — `unverifiedOnly` explica por qué. Antes había un
+    // fallback que mostraba las no verificadas "mejor que decir no encontré
+    // nada", y en vivo terminó ofreciendo Soho (Punta del Este) y Chajá a un
+    // usuario Itaú+OCA que preguntó dónde comer: exactamente lo que el
+    // usuario pidió que no pase ("si no tiene nada, no debe inventar").
+    const verified = candidatesRaw.filter((c) => c.branches.length > 0);
+    const zonePoint = await this.geocodeZone(zone);
+    const nearby = zonePoint
+      ? verified.filter((c) =>
+          c.branches.some(
+            (b) => distanceKm(zonePoint, b.point) <= NEARBY_RADIUS_KM,
+          ),
+        )
+      : verified;
+
+    // Nada confirmado en el barrio del usuario, pero sí en otra parte de
+    // Montevideo: seguimos recomendando (mejor eso que nada) pero queda
+    // marcado para que la respuesta lo diga en vez de hacerlo pasar por
+    // "cerca tuyo".
+    const zoneWidened =
+      Boolean(zonePoint) && verified.length > 0 && nearby.length === 0;
+    const candidates = nearby.length > 0 ? nearby : verified;
 
     const comparison = computePromotionComparison(candidates, today);
     const estimatedSaving = computeEstimatedSaving(comparison.today, amount);
@@ -156,20 +185,12 @@ export class BrowseByCategoryUseCase {
       queryLabel: categoryName ?? 'lo mejor de hoy en Montevideo',
       zone,
       bestToday: comparison.today
-        ? toRecommendationOption(
-            comparison.today,
-            comparison.today.merchantChainName,
-          )
+        ? this.toOption(comparison.today, zonePoint)
         : null,
-      alternatives: alternatives.map((c) =>
-        toRecommendationOption(c, c.merchantChainName),
-      ),
+      alternatives: alternatives.map((c) => this.toOption(c, zonePoint)),
       betterSoon: comparison.better
         ? {
-            option: toRecommendationOption(
-              comparison.better.promotion,
-              comparison.better.promotion.merchantChainName,
-            ),
+            option: this.toOption(comparison.better.promotion, zonePoint),
             daysFromNow: comparison.better.daysFromNow,
             estimatedSaving: estimatedSavingBetterSoon
               ? {
@@ -187,13 +208,12 @@ export class BrowseByCategoryUseCase {
         : null,
       nothingFound: !comparison.today && !comparison.better,
       spentAmount: amount ?? null,
-      // bestToday puede venir del fallback sin verificar (ver comentario de
-      // "verified" arriba) — si es así, el Response Generator tiene que
-      // avisarlo en vez de recomendarlo con la misma confianza que una
-      // cadena confirmada en Montevideo.
-      locationUnverified: comparison.today
-        ? !comparison.today.hasVerifiedMontevideoBranch
-        : false,
+      // Había promos vigentes de la categoría, pero ninguna en una cadena
+      // que podamos confirmar en Montevideo — no recomendamos ninguna, y
+      // esto le dice a la respuesta por qué no es lo mismo que "no hay
+      // promos".
+      unverifiedOnly: verified.length === 0 && candidatesRaw.length > 0,
+      zoneWidened,
       // Preguntar "dónde queda" solo tiene sentido para un comercio puntual
       // (Response Generator necesita un "address" concreto) — a nivel
       // categoría no hay un único lugar que señalar.
@@ -202,35 +222,46 @@ export class BrowseByCategoryUseCase {
   }
 
   /**
-   * Si conocemos el barrio, filtra a sucursales verificadas dentro de
-   * NEARBY_RADIUS_KM — spec del usuario: "no me sirve un restaurante en
-   * Pocitos si estoy en Barrio Sur", aunque los dos estén en Montevideo. Sin
-   * barrio, si el geocoding falla, o si nada queda lo bastante cerca,
-   * devuelve `candidates` sin tocar — mejor mostrar algo en Montevideo que
-   * nada. (La distinción "es lo más cercano" vs "es lo único que hay en
-   * toda la ciudad" todavía no se comunica en la respuesta — pendiente,
-   * junto con preguntar el barrio cuando falta.)
+   * Sucursal concreta que le vamos a nombrar al usuario: la más cercana a su
+   * barrio cuando lo conocemos. Sin barrio geocodificado no elegimos ninguna
+   * — una cadena puede tener 20 sucursales y señalar una al azar sería
+   * inventarle una ubicación.
    */
-  private async filterByProximity(
-    candidates: CategoryCandidate[],
-    zone: string | null,
-  ): Promise<CategoryCandidate[]> {
-    if (!zone) return candidates;
+  private toOption(candidate: CategoryCandidate, zonePoint: GeoPoint | null) {
+    const branch = nearestBranch(candidate.branches, zonePoint);
+    return toRecommendationOption(
+      candidate,
+      candidate.merchantChainName,
+      branch?.name ?? null,
+      branch?.neighborhood ?? null,
+      branch?.address ?? null,
+    );
+  }
 
-    let zonePoint: GeoPoint | null;
+  /**
+   * Resuelve el barrio del usuario a coordenadas para poder medir distancia
+   * real ("no me sirve un restaurante en Pocitos si estoy en Barrio Sur").
+   * Si no hay barrio, o el geocoding falla/no lo reconoce, devolvemos null y
+   * el flujo sigue sin filtro de cercanía — un problema de geocoding no
+   * puede dejar al usuario sin respuesta.
+   */
+  private async geocodeZone(zone: string | null): Promise<GeoPoint | null> {
+    if (!zone) return null;
     try {
-      zonePoint = await this.zoneGeocoder.geocode(zone);
+      return await this.zoneGeocoder.geocode(zone);
     } catch (err) {
       this.logger.warn(`No pude geocodificar "${zone}": ${err}`);
-      return candidates;
+      return null;
     }
-    if (!zonePoint) return candidates;
-
-    const nearby = candidates.filter((c) =>
-      c.branchPoints.some(
-        (point) => distanceKm(zonePoint!, point) <= NEARBY_RADIUS_KM,
-      ),
-    );
-    return nearby.length > 0 ? nearby : candidates;
   }
+}
+
+function nearestBranch(
+  branches: VerifiedBranch[],
+  zonePoint: GeoPoint | null,
+): VerifiedBranch | null {
+  if (!zonePoint || branches.length === 0) return null;
+  return [...branches].sort(
+    (a, b) => distanceKm(zonePoint, a.point) - distanceKm(zonePoint, b.point),
+  )[0];
 }
