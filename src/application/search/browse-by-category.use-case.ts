@@ -321,7 +321,13 @@ function nearestBranch(
   branches: VerifiedBranch[],
   zonePoint: GeoPoint | null,
 ): VerifiedBranch | null {
-  if (!zonePoint || branches.length === 0) return null;
+  if (branches.length === 0) return null;
+  // Sin barrio no podemos elegir la más cercana, pero si la cadena tiene una
+  // sola sucursal no hay nada que elegir: nombrarla es un dato real, no una
+  // ubicación inventada. Antes devolvíamos null también en ese caso y la
+  // respuesta salía sin dirección (bug del 14/8: "25% en Bruta", a 230m del
+  // usuario, sin decir dónde queda).
+  if (!zonePoint) return branches.length === 1 ? branches[0] : null;
   return [...branches].sort(
     (a, b) => distanceKm(zonePoint, a.point) - distanceKm(zonePoint, b.point),
   )[0];

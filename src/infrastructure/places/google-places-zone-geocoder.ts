@@ -1,10 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GeoPoint } from '../../domain/geocoding/geo-point';
-import {
-  ZONE_GEOCODER,
-  ZoneGeocoder,
-} from '../../domain/geocoding/zone-geocoder.port';
+import { ZoneGeocoder } from '../../domain/geocoding/zone-geocoder.port';
 import {
   isInMontevideo,
   MONTEVIDEO_BIAS,
@@ -84,8 +81,3 @@ export class GooglePlacesZoneGeocoder implements ZoneGeocoder {
     };
   }
 }
-
-export const GOOGLE_PLACES_ZONE_GEOCODER = {
-  provide: ZONE_GEOCODER,
-  useClass: GooglePlacesZoneGeocoder,
-};
