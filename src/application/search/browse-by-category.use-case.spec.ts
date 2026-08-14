@@ -721,6 +721,34 @@ describe('BrowseByCategoryUseCase', () => {
     expect(rec.zoneWidened).toBe(false);
   });
 
+  it('entre dos promos del mismo % gana la más cercana al barrio (caso real: 60 restaurantes de Itaú, todos 15%)', async () => {
+    const zone: GeoPoint = { latitude: -34.91088, longitude: -56.18818 }; // Barrio Sur
+    const lejos: GeoPoint = { latitude: -34.9186, longitude: -56.1565 }; // Pocitos, ~2.9km
+    const cerca: GeoPoint = { latitude: -34.9105, longitude: -56.1825 }; // ~500m
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Baco',
+        discountPercentage: 15,
+        branches: [branch(lejos, 'Baco Pocitos')],
+      }),
+      row({
+        merchantChainId: 'c2',
+        merchantChainName: 'La Cocina de Pedro',
+        discountPercentage: 15,
+        branches: [branch(cerca, 'La Cocina de Pedro')],
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(zone),
+    );
+
+    const rec = await useCase.execute('Restaurantes', 'Barrio Sur');
+
+    expect(rec.bestToday?.merchantChainName).toBe('La Cocina de Pedro');
+  });
+
   it('ofrece un beneficio sin % (2x1) por su carril, sin meterlo en el ranking ni traducirlo a porcentaje', async () => {
     const prisma = buildPrisma([
       row({

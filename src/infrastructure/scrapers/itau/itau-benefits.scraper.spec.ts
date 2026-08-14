@@ -18,6 +18,78 @@ function item(titulo: string, descripcion: string): string {
   </item>`;
 }
 
+/** Estructura real recortada de restaurantes.html (Astro, HTML estático). */
+function restaurantsPage(options?: {
+  percentText?: string;
+  mvd?: string[];
+  pde?: string[];
+}): string {
+  const card = (name: string) => {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    return `<a id="restaurant-${slug}" title="${name}" href="#"><img alt="${name}" src="x.webp"></a>`;
+  };
+  const { percentText = '15% menos', mvd = [], pde = [] } = options ?? {};
+  return `<html><body>
+    <h1>${percentText}</h1>
+    <p>Todos los días, con tarjetas débito Volar y todas las tarjetas de crédito Itaú de Uruguay.</p>
+    <section id="tab-mvd"><h2>Restaurantes</h2>${mvd.map(card).join('')}
+      <h2>Tiendas Gourmet</h2><a id="gourmet-almacen" title="Almacén"><img alt="Almacén"></a>
+    </section>
+    <section class="hidden" id="tab-pde"><h2>Restaurantes</h2>${pde.map(card).join('')}</section>
+  </body></html>`;
+}
+
+describe('ItauBenefitsScraper.parseRestaurants', () => {
+  const scraper = new ItauBenefitsScraper();
+
+  it('lee los restaurantes de la solapa Montevideo con el descuento que anuncia la página', () => {
+    const promos = scraper.parseRestaurants(
+      restaurantsPage({ mvd: ['La Cocina de Pedro', 'Café Haus'] }),
+    );
+
+    expect(promos).toHaveLength(2);
+    expect(promos[0]).toMatchObject({
+      merchantChainName: 'La Cocina de Pedro',
+      categoryName: 'Restaurantes',
+      discountPercentage: 15,
+      paymentType: PaymentType.AMBOS,
+      sourceUrl: 'https://www.itau.com.uy/inst/restaurantes.html',
+    });
+  });
+
+  it('ignora las otras solapas — la clasificación por zona la hace el propio banco', () => {
+    // Caso real: Itaú lista 78 restaurantes en Montevideo y 72 en Punta del
+    // Este; mezclar las solapas repetiría el bug de Soho a gran escala.
+    const promos = scraper.parseRestaurants(
+      restaurantsPage({ mvd: ['Eladio'], pde: ['La Huella', 'Ovo Beach'] }),
+    );
+
+    expect(promos.map((p) => p.merchantChainName)).toEqual(['Eladio']);
+  });
+
+  it('ignora las secciones que no son Restaurantes (tiendas gourmet, librerías)', () => {
+    const promos = scraper.parseRestaurants(restaurantsPage({ mvd: ['Baco'] }));
+
+    expect(promos.map((p) => p.merchantChainName)).toEqual(['Baco']);
+  });
+
+  it('no ingiere nada si la página dejó de decir el descuento, en vez de inventarlo', () => {
+    const promos = scraper.parseRestaurants(
+      restaurantsPage({ percentText: 'Descuentos especiales', mvd: ['Baco'] }),
+    );
+
+    expect(promos).toEqual([]);
+  });
+
+  it('no repite un comercio que aparece dos veces en la misma solapa', () => {
+    const promos = scraper.parseRestaurants(
+      restaurantsPage({ mvd: ['Café Misterio', 'Café Misterio'] }),
+    );
+
+    expect(promos).toHaveLength(1);
+  });
+});
+
 describe('ItauBenefitsScraper.parse', () => {
   const scraper = new ItauBenefitsScraper();
 

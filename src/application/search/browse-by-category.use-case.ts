@@ -379,12 +379,34 @@ function selectRecommendable<T extends { branches: VerifiedBranch[] }>(
       )
     : verified;
 
+  const selected = nearby.length > 0 ? nearby : verified;
+
+  // Ordenar por cercanía acá adentro es lo que desempata más adelante: los
+  // sorts por porcentaje son estables, así que entre dos promos del mismo %
+  // gana la que está más cerca. Sin esto, con 60 restaurantes de Itaú todos
+  // al 15% en Montevideo, "el mejor de hoy" salía en un orden arbitrario y
+  // podía mandar al usuario al otro lado del barrio.
+  const sorted = zonePoint
+    ? [...selected].sort(
+        (a, b) =>
+          nearestDistanceKm(a.branches, zonePoint) -
+          nearestDistanceKm(b.branches, zonePoint),
+      )
+    : selected;
+
   return {
     verified,
-    candidates: nearby.length > 0 ? nearby : verified,
+    candidates: sorted,
     zoneWidened:
       Boolean(zonePoint) && verified.length > 0 && nearby.length === 0,
   };
+}
+
+function nearestDistanceKm(
+  branches: VerifiedBranch[],
+  zonePoint: GeoPoint,
+): number {
+  return Math.min(...branches.map((b) => distanceKm(zonePoint, b.point)));
 }
 
 function nearestBranch(
