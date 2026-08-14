@@ -64,6 +64,16 @@ export interface Recommendation {
    */
   unverifiedOnly: boolean;
   /**
+   * La mejor opción de hoy en un banco que el usuario NO tiene, con el
+   * mismo estándar que una recomendación real (sucursal verificada y cerca
+   * si sabemos el barrio). Solo se llena cuando con sus tarjetas no hay
+   * nada: convierte un "no tengo nada" seco en "con tus tarjetas no, pero
+   * con Santander hay 25% acá al lado". No es una recomendación — no puede
+   * usarla salvo que consiga esa tarjeta — así que nunca reemplaza a
+   * `bestToday`.
+   */
+  bestWithOtherBank: RecommendationOption | null;
+  /**
    * true si sabíamos el barrio del usuario pero ninguna sucursal
    * verificada queda dentro del radio de cercanía — lo que ofrecemos está
    * confirmado en Montevideo, pero en otra parte de la ciudad. El Response

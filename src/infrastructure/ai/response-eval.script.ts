@@ -31,6 +31,7 @@ function recommendation(overrides: Partial<Recommendation>): Recommendation {
     asksLocation: false,
     unverifiedOnly: false,
     zoneWidened: false,
+    bestWithOtherBank: null,
     ...overrides,
   };
 }

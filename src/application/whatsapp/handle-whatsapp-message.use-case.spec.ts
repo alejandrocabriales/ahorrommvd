@@ -90,6 +90,7 @@ const DEFAULT_RECOMMENDATION: Recommendation = {
   asksLocation: false,
   unverifiedOnly: false,
   zoneWidened: false,
+  bestWithOtherBank: null,
 };
 
 const DEFAULT_AI_REPLY = 'La mejor opción es Farmashop con Itaú, 15%.';
@@ -346,7 +347,9 @@ describe('HandleWhatsAppMessageUseCase', () => {
       expect(responseGenerator.generate).toHaveBeenCalledWith(
         expect.objectContaining({
           asksLocation: true,
-          bestToday: expect.objectContaining({ address: 'Bulevar España 2411' }),
+          bestToday: expect.objectContaining({
+            address: 'Bulevar España 2411',
+          }),
         }),
       );
     });
@@ -487,7 +490,47 @@ describe('HandleWhatsAppMessageUseCase', () => {
       expect.stringContaining('%'),
     );
     expect(responseGenerator.generate).not.toHaveBeenCalled();
-    expect(saveConversationContext.execute).not.toHaveBeenCalled();
+    // El tema sí existió aunque no hubiera nada que recomendar: se guarda
+    // para que el "y para tarjetas Itaú?" siguiente lo retome en vez de
+    // contestar "no entendí bien qué buscás".
+    expect(saveConversationContext.execute).toHaveBeenCalledWith(
+      '598',
+      expect.objectContaining({
+        query: expect.objectContaining({ categoryName: 'Restaurantes' }),
+      }),
+    );
+  });
+
+  it('cuando con sus tarjetas no hay nada, dice qué hay con otro banco en vez de cortar con un "no tengo nada"', async () => {
+    const { useCase, browseByCategory, sender } = build(
+      intent({ categoryName: 'Restaurantes' }),
+    );
+    (browseByCategory.execute as jest.Mock).mockResolvedValue({
+      ...DEFAULT_RECOMMENDATION,
+      queryLabel: 'Restaurantes',
+      bestToday: null,
+      nothingFound: true,
+      unverifiedOnly: true,
+      bestWithOtherBank: {
+        merchantChainName: 'Porto Vanila',
+        branchName: 'Porto Vanila Caffé',
+        neighborhood: 'Pocitos',
+        address: 'Av. Luis Alberto de Herrera 1290, Montevideo',
+        bankName: 'Santander',
+        discountPercentage: 25,
+        paymentType: 'AMBOS',
+        cardName: null,
+      },
+    });
+
+    await useCase.execute('598', 'que promo tengo para comer');
+
+    expect(sender.sendTextMessage).toHaveBeenCalledWith(
+      '598',
+      expect.stringContaining(
+        'Con Santander sí hay 25% en Porto Vanila Caffé (Av. Luis Alberto de Herrera 1290, Montevideo)',
+      ),
+    );
   });
 
   it('browses across all 3 MVP categories when the user wants general savings with no merchant/category (ej. "quiero ahorrar hoy")', async () => {
@@ -708,7 +751,10 @@ describe('HandleWhatsAppMessageUseCase', () => {
         UNKNOWN_USER,
       );
 
-      await useCase.execute('598', 'dame todas las ofertas de restaurantes en Barrio Sur');
+      await useCase.execute(
+        '598',
+        'dame todas las ofertas de restaurantes en Barrio Sur',
+      );
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
         'Restaurantes',
@@ -1226,7 +1272,9 @@ describe('HandleWhatsAppMessageUseCase', () => {
     });
 
     it('answers a bare neighborhood with no merchant/category by browsing all 3 categories, scoped by zone ("Pocitos" solo)', async () => {
-      const { useCase, browseByCategory, sender } = build(intent({ zone: 'Pocitos' }));
+      const { useCase, browseByCategory, sender } = build(
+        intent({ zone: 'Pocitos' }),
+      );
 
       await useCase.execute('598', 'Pocitos');
 
@@ -1236,7 +1284,10 @@ describe('HandleWhatsAppMessageUseCase', () => {
         'user-1',
         undefined,
       );
-      expect(sender.sendTextMessage).toHaveBeenCalledWith('598', DEFAULT_AI_REPLY);
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        DEFAULT_AI_REPLY,
+      );
     });
 
     it('does not default to the known zone for a message with no topic at all (no false-positive "Pocitos" answer to "hola")', async () => {

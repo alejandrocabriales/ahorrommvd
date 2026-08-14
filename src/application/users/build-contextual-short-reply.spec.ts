@@ -65,7 +65,7 @@ const BETTER_SOON: Recommendation['betterSoon'] = {
 };
 
 const BETTER_SOON_WITH_SAVING: Recommendation['betterSoon'] = {
-  ...BETTER_SOON!,
+  ...BETTER_SOON,
   estimatedSaving: { amount: 1200, cappedByBank: false },
 };
 
@@ -81,6 +81,7 @@ const BASE: Recommendation = {
   asksLocation: false,
   unverifiedOnly: false,
   zoneWidened: false,
+  bestWithOtherBank: null,
 };
 
 describe('buildContextualShortReply', () => {

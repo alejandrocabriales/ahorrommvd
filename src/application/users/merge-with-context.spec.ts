@@ -46,6 +46,7 @@ const FARMACIAS_RECOMMENDATION: Recommendation = {
   asksLocation: false,
   unverifiedOnly: false,
   zoneWidened: false,
+  bestWithOtherBank: null,
 };
 
 function contextAt(
@@ -105,6 +106,25 @@ describe('mergeWithContext', () => {
       amount: 600,
       wantsGeneralSavings: false,
     });
+  });
+
+  it('retoma el tema cuando el seguimiento solo cambia las tarjetas ("y para tarjetas Itaú?")', () => {
+    // Bug real (14/8): venía de preguntar dónde comer, dijo "y para
+    // tarjetas Itau?" y el bot le guardó el banco pero contestó "no
+    // entendí bien qué buscás" — el tema estaba en el contexto.
+    const context = contextAt(2, FARMACIAS_QUERY);
+    const result = mergeWithContext(intent({ banks: ['Itaú'] }), context, NOW);
+    expect(result.categoryName).toBe('Farmacias');
+  });
+
+  it('retoma el tema con "dame todas" (mismo caso, sin filtro de banco)', () => {
+    const context = contextAt(2, FARMACIAS_QUERY);
+    const result = mergeWithContext(
+      intent({ showAllBanks: true }),
+      context,
+      NOW,
+    );
+    expect(result.categoryName).toBe('Farmacias');
   });
 
   it('does not merge when the message opens its own topic, even with fresh context', () => {
