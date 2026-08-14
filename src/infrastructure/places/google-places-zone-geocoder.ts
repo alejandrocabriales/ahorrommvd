@@ -78,7 +78,10 @@ export class GooglePlacesZoneGeocoder implements ZoneGeocoder {
       return null;
     }
 
-    return { latitude: match.location.latitude, longitude: match.location.longitude };
+    return {
+      latitude: match.location.latitude,
+      longitude: match.location.longitude,
+    };
   }
 }
 

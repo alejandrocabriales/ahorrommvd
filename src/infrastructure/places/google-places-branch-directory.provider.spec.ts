@@ -12,7 +12,7 @@ function mockPlacesResponse(places: unknown[]) {
     ok: true,
     json: () => Promise.resolve({ places }),
     text: () => Promise.resolve(''),
-  }) as unknown as typeof fetch;
+  });
 }
 
 // Casos reales capturados a mano contra la Places API (New) buscando "Soho
