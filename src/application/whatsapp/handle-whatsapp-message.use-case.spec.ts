@@ -88,7 +88,8 @@ const DEFAULT_RECOMMENDATION: Recommendation = {
   nothingFound: false,
   spentAmount: null,
   asksLocation: false,
-  locationUnverified: false,
+  unverifiedOnly: false,
+  zoneWidened: false,
 };
 
 const DEFAULT_AI_REPLY = 'La mejor opción es Farmashop con Itaú, 15%.';
@@ -275,8 +276,14 @@ describe('HandleWhatsAppMessageUseCase', () => {
           branchId: 'b1',
           branchName: 'Ta-Ta Pocitos',
           neighborhood: 'Pocitos',
+          address: null,
         },
-        { branchId: 'b2', branchName: 'Ta-Ta Cerro', neighborhood: 'Cerro' },
+        {
+          branchId: 'b2',
+          branchName: 'Ta-Ta Cerro',
+          neighborhood: 'Cerro',
+          address: null,
+        },
       ],
     });
 
@@ -323,6 +330,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
         {
           status: 'resolved',
           merchantChainName: 'Chajá',
+          branchId: 'b1',
           branchName: 'Chajá Pocitos',
           neighborhood: 'Pocitos',
           address: 'Bulevar España 2411',
@@ -343,12 +351,15 @@ describe('HandleWhatsAppMessageUseCase', () => {
       );
     });
 
-    it('leaves address null (honest gap, never invented) when we never loaded one for that branch', async () => {
+    it('leaves address null (honest gap, never invented) when the branch exists but we never loaded its address', async () => {
       const { useCase, responseGenerator } = build(
         intent({ merchantName: 'Chajá', asksLocation: true }),
         {
           status: 'resolved',
           merchantChainName: 'Chajá',
+          branchId: 'b1',
+          branchName: 'Chajá Pocitos',
+          neighborhood: 'Pocitos',
           message: 'irrelevante',
           today: TODAY_PROMO,
           better: null,
@@ -364,6 +375,36 @@ describe('HandleWhatsAppMessageUseCase', () => {
           bestToday: expect.objectContaining({ address: null }),
         }),
       );
+    });
+
+    it('says there is no branch at all — without calling the AI — when the chain has zero branches loaded (bug found live: "donde queda Soho?" answered with "aplica en cualquier local, buscá el más cercano")', async () => {
+      const { useCase, responseGenerator, sender, saveConversationContext } =
+        build(intent({ merchantName: 'Soho', asksLocation: true }), {
+          status: 'resolved',
+          merchantChainName: 'Soho',
+          message: 'irrelevante',
+          today: TODAY_PROMO,
+          better: null,
+          upcoming: [TODAY_PROMO],
+        });
+
+      await useCase.execute('598', 'donde queda Soho?');
+
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('Soho'),
+      );
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('ninguna sucursal'),
+      );
+      // Lo que NO puede decir: que hay locales donde ir a buscar.
+      expect(sender.sendTextMessage).not.toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('cualquier local'),
+      );
+      expect(responseGenerator.generate).not.toHaveBeenCalled();
+      expect(saveConversationContext.execute).not.toHaveBeenCalled();
     });
   });
 
@@ -412,6 +453,41 @@ describe('HandleWhatsAppMessageUseCase', () => {
       'user-1',
       undefined,
     );
+  });
+
+  it('says plainly that nothing is confirmed in Montevideo — without calling the AI — when the only promos left are unverified (bug found live: Soho/Punta del Este and Chajá offered to an Itaú+OCA user)', async () => {
+    const {
+      useCase,
+      browseByCategory,
+      responseGenerator,
+      sender,
+      saveConversationContext,
+    } = build(intent({ categoryName: 'Restaurantes' }));
+    (browseByCategory.execute as jest.Mock).mockResolvedValue({
+      ...DEFAULT_RECOMMENDATION,
+      queryLabel: 'Restaurantes',
+      bestToday: null,
+      nothingFound: true,
+      unverifiedOnly: true,
+    });
+
+    await useCase.execute('598', 'estoy buscando ofertas para comer');
+
+    expect(sender.sendTextMessage).toHaveBeenCalledWith(
+      '598',
+      expect.stringContaining('Restaurantes'),
+    );
+    expect(sender.sendTextMessage).toHaveBeenCalledWith(
+      '598',
+      expect.stringContaining('confirmado en Montevideo'),
+    );
+    // Ni un % suelto: si aparece, alguna promo se coló en la respuesta.
+    expect(sender.sendTextMessage).not.toHaveBeenCalledWith(
+      '598',
+      expect.stringContaining('%'),
+    );
+    expect(responseGenerator.generate).not.toHaveBeenCalled();
+    expect(saveConversationContext.execute).not.toHaveBeenCalled();
   });
 
   it('browses across all 3 MVP categories when the user wants general savings with no merchant/category (ej. "quiero ahorrar hoy")', async () => {
@@ -513,6 +589,35 @@ describe('HandleWhatsAppMessageUseCase', () => {
         undefined,
       );
       expect(setUserBanks.execute).not.toHaveBeenCalled();
+    });
+
+    it('does not blame the user cards for an empty answer when the search ignored them', async () => {
+      const { useCase, browseByCategory, sender } = build(
+        intent({ categoryName: 'Restaurantes', showAllBanks: true }),
+        undefined,
+        KNOWN_USER,
+      );
+      (browseByCategory.execute as jest.Mock).mockResolvedValue({
+        ...DEFAULT_RECOMMENDATION,
+        queryLabel: 'Restaurantes',
+        bestToday: null,
+        nothingFound: true,
+        unverifiedOnly: true,
+      });
+
+      await useCase.execute(
+        '598',
+        'mostrame todas las ofertas de restaurantes',
+      );
+
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('confirmado en Montevideo'),
+      );
+      expect(sender.sendTextMessage).not.toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('tus tarjetas'),
+      );
     });
   });
 

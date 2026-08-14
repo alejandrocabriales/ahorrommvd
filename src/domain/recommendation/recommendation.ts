@@ -2,9 +2,9 @@ import { PaymentType } from '../../../generated/prisma/client';
 
 /**
  * Una opción concreta para recomendar — comercio + banco + descuento. Nunca
- * se afirma "cerca tuyo" salvo que `neighborhood` venga con dato real: no
- * tenemos coordenadas cargadas para ninguna sucursal todavía (128/132
- * cadenas ni siquiera tienen una sucursal con dirección en la base).
+ * se afirma "cerca tuyo" salvo que `neighborhood`/`address` vengan con dato
+ * real: en la recomendación por categoría se llenan solo cuando sabemos el
+ * barrio del usuario y elegimos la sucursal verificada más cercana.
  */
 export interface RecommendationOption {
   merchantChainName: string;
@@ -51,14 +51,23 @@ export interface Recommendation {
   /** true si el usuario preguntó explícitamente dónde queda el comercio — le dice al Response Generator que priorice `bestToday.address` en vez de repetir el descuento, o que sea honesto si no tenemos esa dirección cargada. */
   asksLocation: boolean;
   /**
-   * true si `bestToday` no tiene ninguna sucursal verificada en Montevideo
-   * (ver `hasVerifiedMontevideoBranch` en BrowseByCategoryUseCase) — la
-   * promo existe de verdad, pero no pudimos confirmar que el comercio esté
-   * en Montevideo (puede estar en otra ciudad, como pasó con Soho/Punta del
-   * Este). Solo se usa en la recomendación por categoría — una búsqueda por
-   * comercio puntual siempre queda en false, ahí el usuario ya eligió qué
-   * quiere. El Response Generator tiene que avisarlo, nunca recomendarlo
-   * con la misma confianza que una opción verificada.
+   * true cuando hay promos vigentes de la categoría pero NINGUNA cadena
+   * tiene sucursal verificada en Montevideo — no recomendamos ninguna
+   * (spec del usuario: "si no tiene nada, no debe inventar"). Va siempre
+   * junto con `nothingFound: true`, y sirve para explicar por qué no hay
+   * recomendación: no es que no existan promos, es que no podemos
+   * confirmar que esos comercios estén en Montevideo (caso real:
+   * Soho/Punta del Este y Chajá, las únicas de Restaurantes para un
+   * usuario Itaú+OCA). Solo aplica a la recomendación por categoría — una
+   * búsqueda por comercio puntual siempre queda en false, ahí el usuario
+   * ya eligió qué quiere.
    */
-  locationUnverified: boolean;
+  unverifiedOnly: boolean;
+  /**
+   * true si sabíamos el barrio del usuario pero ninguna sucursal
+   * verificada queda dentro del radio de cercanía — lo que ofrecemos está
+   * confirmado en Montevideo, pero en otra parte de la ciudad. El Response
+   * Generator tiene que decirlo, no hacer pasar la opción por "cerca tuyo".
+   */
+  zoneWidened: boolean;
 }

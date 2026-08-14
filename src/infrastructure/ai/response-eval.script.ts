@@ -29,7 +29,8 @@ function recommendation(overrides: Partial<Recommendation>): Recommendation {
     nothingFound: false,
     spentAmount: null,
     asksLocation: false,
-    locationUnverified: false,
+    unverifiedOnly: false,
+    zoneWidened: false,
     ...overrides,
   };
 }
@@ -160,11 +161,17 @@ const CASES: EvalCase[] = [
     ],
   },
   {
-    label: 'asksLocation SIN address -> debe ser honesto, no ignorar la pregunta',
+    label:
+      'asksLocation con sucursal conocida pero SIN address -> honesto sobre la dirección, sin inventar locales (bug real: "donde queda Soho?" -> "buscá el más cercano")',
     recommendation: recommendation({
       queryLabel: 'Chajá',
       asksLocation: true,
-      bestToday: { ...FARMASHOP, merchantChainName: 'Chajá' },
+      bestToday: {
+        ...FARMASHOP,
+        merchantChainName: 'Chajá',
+        branchName: 'Chajá Pocitos',
+        neighborhood: 'Pocitos',
+      },
     }),
     checks: [
       {
@@ -179,30 +186,53 @@ const CASES: EvalCase[] = [
           );
         },
       },
+      {
+        name: 'no da por hecho locales que no tenemos ("cualquier local", "el más cercano")',
+        predicate: (t) => {
+          const lower = t.toLowerCase();
+          return (
+            !lower.includes('cualquier local') && !lower.includes('más cercano')
+          );
+        },
+      },
       isConcise(35),
       noBannedWords(),
       noRobotPhrases(),
     ],
   },
   {
-    label: 'locationUnverified -> debe avisar que no está confirmado en Montevideo, no recomendar con confianza plena (bug real: Soho/Punta del Este recomendado a un usuario de Barrio Sur)',
+    label:
+      'zoneWidened -> debe admitir que en el barrio del usuario no hay nada y que lo que ofrece queda en otra parte de Montevideo (bug real: "no tengo opciones en Buceo, pero aplica en cualquier local")',
     recommendation: recommendation({
-      zone: 'Barrio Sur',
-      bestToday: { ...FARMASHOP, merchantChainName: 'Soho', bankName: 'Itaú', discountPercentage: 25 },
-      locationUnverified: true,
+      queryLabel: 'Restaurantes',
+      zone: 'Buceo',
+      bestToday: {
+        ...FARMASHOP,
+        merchantChainName: 'Porto Vanila',
+        branchName: 'Porto Vanila Ciudad Vieja',
+        neighborhood: 'Ciudad Vieja',
+        address: 'Pérez Castellano 1422, Montevideo',
+        bankName: 'Santander',
+        discountPercentage: 25,
+      },
+      zoneWidened: true,
     }),
     checks: [
       {
-        name: 'avisa que no está confirmado en Montevideo',
+        name: 'nombra el barrio del usuario y admite que la opción está en otro lado',
         predicate: (t) => {
           const lower = t.toLowerCase();
           return (
-            lower.includes('no tengo confirmado') ||
-            lower.includes('no confirmo') ||
-            lower.includes('no puedo confirmar') ||
-            (lower.includes('montevideo') && lower.includes('no'))
+            lower.includes('buceo') &&
+            (lower.includes('ciudad vieja') ||
+              lower.includes('no tengo') ||
+              lower.includes('lo más cerca'))
           );
         },
+      },
+      {
+        name: 'no tapa la distancia con "aplica en cualquier local"',
+        predicate: (t) => !t.toLowerCase().includes('cualquier local'),
       },
       noBannedWords(),
       noRobotPhrases(),
