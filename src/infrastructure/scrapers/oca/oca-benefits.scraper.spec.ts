@@ -54,6 +54,70 @@ describe('OcaBenefitsScraper.normalize', () => {
     expect(promos).toHaveLength(0);
   });
 
+  it('toma el porcentaje del titular cuando la letra chica no lo dice (caso real: Burger King 10%, todos los días)', () => {
+    const [promo] = scraper.normalize([
+      {
+        brand: 'Burger King',
+        title_ben: '10% de dto.',
+        date_ini: '2026-01-01',
+        date_end: '2026-12-31',
+        days: ALL_WEEK_DAYS,
+        location: ['2', '10'],
+        description_terms:
+          '<p>Promoción válida todos los días en locales adheridos.</p>',
+      },
+    ]);
+
+    expect(promo.merchantChainName).toBe('Burger King');
+    expect(promo.discountPercentage).toBe(10);
+  });
+
+  it('la letra chica le gana al titular: es la que trae el tope junto al %', () => {
+    const [promo] = scraper.normalize([
+      {
+        brand: 'Farmashop',
+        title_ben: '20% de dto.',
+        date_ini: '2026-08-01',
+        date_end: '2026-08-31',
+        days: ALL_WEEK_DAYS,
+        description_terms: '<p>10% de descuento. Tope: $1.500.</p>',
+      },
+    ]);
+
+    expect(promo.discountPercentage).toBe(10);
+    expect(promo.capAmount).toBe(1500);
+  });
+
+  it('saltea un beneficio que declara departamentos y no incluye Montevideo', () => {
+    const promos = scraper.normalize([
+      {
+        brand: 'Parador de Maldonado',
+        title_ben: '20% de dto.',
+        date_ini: '2026-08-01',
+        date_end: '2026-12-31',
+        days: ALL_WEEK_DAYS,
+        location: ['9'], // Maldonado
+        description_terms: '<p>20% de descuento.</p>',
+      },
+    ]);
+
+    expect(promos).toHaveLength(0);
+  });
+
+  it('no filtra por zona cuando el beneficio no declara departamentos — ausencia de dato no es un "no"', () => {
+    const promos = scraper.normalize([
+      {
+        brand: 'Farmashop',
+        date_ini: '2026-08-01',
+        date_end: '2026-08-31',
+        days: ALL_WEEK_DAYS,
+        description_terms: '<p>10% de descuento.</p>',
+      },
+    ]);
+
+    expect(promos).toHaveLength(1);
+  });
+
   it('skips entries with no brand/title', () => {
     const promos = scraper.normalize([
       {

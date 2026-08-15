@@ -36,14 +36,32 @@ const CATEGORY_UID_TO_MVP: Record<string, MvpCategoryName> = {
   blt1d4c56f9d17a15a1: 'Restaurantes', // "gastronomia"
 };
 
+/**
+ * `location` trae los departamentos donde aplica el beneficio, como ids en
+ * orden alfabético del 1 al 19. Montevideo es el 10 — verificado contra los
+ * beneficios de un solo departamento del feed, que son todos comercios
+ * montevideanos (Kentucky, Movie, Óptica Florida) y traen exactamente
+ * `['10']`; no aparece ningún contraejemplo.
+ *
+ * Es la clasificación por zona del propio banco, igual que las solapas de la
+ * landing de Itaú: vale más que cualquier heurística nuestra, y evita el
+ * caso Soho (promo real, pero en otro departamento).
+ */
+const MONTEVIDEO_LOCATION_ID = '10';
+
 interface ContentstackBenefit {
   brand?: string;
   title?: string;
+  /** Titular del beneficio, ya redactado por OCA: "20% de dto.". */
+  title_ben?: string;
+  title_list?: string;
   date_ini?: string;
   date_end?: string;
   days?: string[];
   description_terms?: string;
   category?: Array<{ uid: string }>;
+  /** Ids de departamento; vacío/ausente = el beneficio no declara zona. */
+  location?: string[];
 }
 
 interface ContentstackResponse {
@@ -144,8 +162,28 @@ export class OcaBenefitsScraper implements BankScraper {
 
       if (!benefit.date_ini || !benefit.date_end) continue;
 
+      // El beneficio declara sus departamentos: si los declara y Montevideo
+      // no está, no nos sirve (spec: "Zona: Montevideo únicamente"). Si no
+      // declara ninguno no filtramos — ausencia de dato no es un "no".
+      const locations = benefit.location ?? [];
+      if (locations.length > 0 && !locations.includes(MONTEVIDEO_LOCATION_ID)) {
+        this.logger.debug(
+          `Salteo "${merchantChainName}": no aplica en Montevideo`,
+        );
+        continue;
+      }
+
       const text = stripHtml(benefit.description_terms ?? '');
-      const percentMatch = text.match(/(\d{1,2})\s*%/);
+      // La letra chica es la fuente preferida porque suele traer el tope
+      // junto al %. Cuando no dice el porcentaje, lo toma del titular que
+      // OCA ya redactó ("20% de dto.") en vez de descartar el beneficio:
+      // eso solo se perdían promos reales (Burger King, El Club de la Papa
+      // Frita y Chajá, las tres con local en Montevideo y todos los días).
+      const percentMatch =
+        text.match(/(\d{1,2})\s*%/) ??
+        `${benefit.title_ben ?? ''} ${benefit.title_list ?? ''}`.match(
+          /(\d{1,2})\s*%/,
+        );
       if (!percentMatch) {
         this.logger.debug(
           `Sin porcentaje detectable, salteo: ${merchantChainName}`,
