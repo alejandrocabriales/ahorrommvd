@@ -5,6 +5,7 @@ import {
   BANK_SCRAPERS,
   BankScraper,
 } from '../../domain/scraping/bank-scraper.port';
+import { ScrapedBranch } from '../../domain/scraping/scraped-promotion';
 import { matchMerchantChain } from './merchant-chain-matcher';
 
 export interface BankSyncResult {
@@ -102,6 +103,12 @@ export class SyncPromotionsUseCase {
     > = [];
 
     for (const promo of scraped) {
+      // Una promo sin % y sin texto de beneficio no le dice nada al usuario
+      // — no la guardamos aunque el scraper la haya dejado pasar.
+      if (promo.discountPercentage === undefined && !promo.benefitLabel) {
+        continue;
+      }
+
       let chain = matchMerchantChain(chains, promo.merchantChainName);
 
       if (!chain && promo.categoryName) {
@@ -125,6 +132,7 @@ export class SyncPromotionsUseCase {
         continue;
       }
       toPersist.push({ ...promo, merchantChainId: chain.id });
+      await this.saveBankBranches(chain.id, promo.branches);
     }
 
     // createMany en vez de un create() por fila: con las ~130 promos reales
@@ -140,7 +148,8 @@ export class SyncPromotionsUseCase {
           data: toPersist.map((promo) => ({
             bankId: bank.id,
             merchantChainId: promo.merchantChainId,
-            discountPercentage: promo.discountPercentage,
+            discountPercentage: promo.discountPercentage ?? null,
+            benefitLabel: promo.benefitLabel ?? null,
             paymentType: promo.paymentType,
             cardName: promo.cardName,
             capAmount: promo.capAmount,
@@ -166,5 +175,35 @@ export class SyncPromotionsUseCase {
       autoCreatedChains,
       skippedUnmatchedChain,
     };
+  }
+
+  /**
+   * Locales que publica el propio banco junto a la promo (hoy solo Itaú).
+   * Se guardan fuera del delete+create de promociones porque una sucursal no
+   * es la foto de hoy: sobrevive a la promo y puede estar referenciada por un
+   * ahorro registrado.
+   *
+   * El update no toca `address` ni `neighborhood`: si esa sucursal ya vino
+   * del backfill de Places con dirección real, el feed del banco —que solo
+   * trae nombre y coordenadas— no tiene con qué mejorarla.
+   */
+  private async saveBankBranches(
+    merchantChainId: string,
+    branches: ScrapedBranch[] | undefined,
+  ): Promise<void> {
+    for (const branch of branches ?? []) {
+      await this.prisma.branch.upsert({
+        where: {
+          merchantChainId_name: { merchantChainId, name: branch.name },
+        },
+        create: {
+          merchantChainId,
+          name: branch.name,
+          latitude: branch.latitude,
+          longitude: branch.longitude,
+        },
+        update: { latitude: branch.latitude, longitude: branch.longitude },
+      });
+    }
   }
 }

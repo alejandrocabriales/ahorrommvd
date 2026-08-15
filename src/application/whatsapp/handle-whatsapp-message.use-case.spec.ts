@@ -91,6 +91,7 @@ const DEFAULT_RECOMMENDATION: Recommendation = {
   unverifiedOnly: false,
   zoneWidened: false,
   bestWithOtherBank: null,
+  otherBenefits: [],
 };
 
 const DEFAULT_AI_REPLY = 'La mejor opción es Farmashop con Itaú, 15%.';
@@ -264,7 +265,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
     expect(registerSaving.execute).not.toHaveBeenCalled();
     expect(sender.sendTextMessage).toHaveBeenCalledWith(
       '598',
-      'No encontré promociones vigentes para Bardo en los próximos 7 días.',
+      'No encontré descuentos vigentes para Bardo en los próximos 7 días.',
     );
   });
 
@@ -498,6 +499,43 @@ describe('HandleWhatsAppMessageUseCase', () => {
       expect.objectContaining({
         query: expect.objectContaining({ categoryName: 'Restaurantes' }),
       }),
+    );
+  });
+
+  it('cuando lo único que hay con sus tarjetas es un beneficio sin % (2x1), lo pone adelante en vez de abrir con "no tengo nada"', async () => {
+    const { useCase, browseByCategory, sender } = build(
+      intent({ categoryName: 'Restaurantes' }),
+    );
+    (browseByCategory.execute as jest.Mock).mockResolvedValue({
+      ...DEFAULT_RECOMMENDATION,
+      queryLabel: 'Restaurantes',
+      bestToday: null,
+      nothingFound: true,
+      unverifiedOnly: true,
+      otherBenefits: [
+        {
+          merchantChainName: 'Freddo',
+          branchName: 'Freddo Pocitos',
+          neighborhood: 'Pocitos',
+          address: '21 de Setiembre 2997',
+          bankName: 'Itaú',
+          label: '2x1 en helados de litro y cucuruchos grandes',
+        },
+      ],
+    });
+
+    await useCase.execute('598', 'que opciones de comida tengo en pocitos');
+
+    const [, message] = (sender.sendTextMessage as jest.Mock).mock.calls[0] as [
+      string,
+      string,
+    ];
+    expect(message).toContain(
+      '2x1 en helados de litro y cucuruchos grandes en Freddo Pocitos (21 de Setiembre 2997) con Itaú',
+    );
+    // El 2x1 va antes que la aclaración de que no hay porcentajes.
+    expect(message.indexOf('2x1')).toBeLessThan(
+      message.indexOf('Descuentos en %'),
     );
   });
 

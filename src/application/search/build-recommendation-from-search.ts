@@ -72,5 +72,6 @@ export function buildRecommendationFromSearch(
     // Solo aplica al flujo por categoría: acá el usuario preguntó por un
     // comercio puntual, ofrecerle otro banco no responde lo que preguntó.
     bestWithOtherBank: null,
+    otherBenefits: [],
   };
 }

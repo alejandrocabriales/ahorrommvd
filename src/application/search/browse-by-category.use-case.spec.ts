@@ -20,7 +20,9 @@ interface FakePromoRow {
   merchantChainId: string;
   merchantChain: { name: string; branches: FakeBranchRow[] };
   bank: { name: string };
-  discountPercentage: number;
+  /** null en un beneficio sin % (ej. un 2x1) — ahí viene benefitLabel. */
+  discountPercentage: number | null;
+  benefitLabel?: string | null;
   paymentType: PaymentType;
   cardName: string | null;
   capAmount: number | null;
@@ -71,6 +73,7 @@ function row(
         ? []
         : [branch(MONTEVIDEO_POINT, merchantChainName)]);
   return {
+    benefitLabel: null,
     bank: { name: 'Itaú' },
     discountPercentage: 10,
     paymentType: PaymentType.CREDITO,
@@ -716,5 +719,138 @@ describe('BrowseByCategoryUseCase', () => {
       address: 'Farmashop 21 de Setiembre',
     });
     expect(rec.zoneWidened).toBe(false);
+  });
+
+  it('entre dos promos del mismo % gana la más cercana al barrio (caso real: 60 restaurantes de Itaú, todos 15%)', async () => {
+    const zone: GeoPoint = { latitude: -34.91088, longitude: -56.18818 }; // Barrio Sur
+    const lejos: GeoPoint = { latitude: -34.9186, longitude: -56.1565 }; // Pocitos, ~2.9km
+    const cerca: GeoPoint = { latitude: -34.9105, longitude: -56.1825 }; // ~500m
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Baco',
+        discountPercentage: 15,
+        branches: [branch(lejos, 'Baco Pocitos')],
+      }),
+      row({
+        merchantChainId: 'c2',
+        merchantChainName: 'La Cocina de Pedro',
+        discountPercentage: 15,
+        branches: [branch(cerca, 'La Cocina de Pedro')],
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(zone),
+    );
+
+    const rec = await useCase.execute('Restaurantes', 'Barrio Sur');
+
+    expect(rec.bestToday?.merchantChainName).toBe('La Cocina de Pedro');
+  });
+
+  it('ofrece un beneficio sin % (2x1) por su carril, sin meterlo en el ranking ni traducirlo a porcentaje', async () => {
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Freddo',
+        discountPercentage: null,
+        benefitLabel: '2x1 en helados de litro y cucuruchos grandes',
+        branches: [branch(MONTEVIDEO_POINT, 'Freddo Pocitos', 'Pocitos')],
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(MONTEVIDEO_POINT),
+    );
+
+    const rec = await useCase.execute('Restaurantes', 'Pocitos');
+
+    expect(rec.bestToday).toBeNull();
+    expect(rec.alternatives).toEqual([]);
+    expect(rec.otherBenefits).toEqual([
+      {
+        merchantChainName: 'Freddo',
+        branchName: 'Freddo Pocitos',
+        neighborhood: 'Pocitos',
+        address: 'Freddo Pocitos',
+        bankName: 'Itaú',
+        label: '2x1 en helados de litro y cucuruchos grandes',
+      },
+    ]);
+  });
+
+  it('un beneficio sin % y sin local confirmado no se ofrece, igual que un descuento', async () => {
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Freddo',
+        discountPercentage: null,
+        benefitLabel: '2x1 en helados',
+        hasVerifiedBranch: false,
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(),
+    );
+
+    const rec = await useCase.execute('Restaurantes', null);
+
+    expect(rec.otherBenefits).toEqual([]);
+  });
+
+  it('filtra los beneficios sin % por las tarjetas del usuario, igual que los descuentos', async () => {
+    const prisma = buildPrisma(
+      [
+        row({
+          merchantChainId: 'c1',
+          merchantChainName: 'Freddo',
+          discountPercentage: null,
+          benefitLabel: '2x1 en helados',
+          bank: { name: 'Itaú' },
+        }),
+        row({
+          merchantChainId: 'c2',
+          merchantChainName: 'Movie',
+          discountPercentage: null,
+          benefitLabel: '2x1 en entradas',
+          bank: { name: 'OCA' },
+        }),
+      ],
+      ['Itaú'],
+    );
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(),
+    );
+
+    const rec = await useCase.execute('Restaurantes', null, 'user-itau');
+
+    expect(rec.otherBenefits.map((b) => b.merchantChainName)).toEqual([
+      'Freddo',
+    ]);
+  });
+
+  it('un beneficio sin % no cuenta como "hay promos que no puedo confirmar" — no vuelve unverifiedOnly a la respuesta', async () => {
+    const prisma = buildPrisma([
+      row({
+        merchantChainId: 'c1',
+        merchantChainName: 'Freddo',
+        discountPercentage: null,
+        benefitLabel: '2x1 en helados',
+        branches: [branch(MONTEVIDEO_POINT, 'Freddo Pocitos')],
+      }),
+    ]);
+    const useCase = new BrowseByCategoryUseCase(
+      prisma as never,
+      fakeGeocoder(),
+    );
+
+    const rec = await useCase.execute('Restaurantes', null);
+
+    expect(rec.nothingFound).toBe(true);
+    expect(rec.unverifiedOnly).toBe(false);
+    expect(rec.otherBenefits).toHaveLength(1);
   });
 });

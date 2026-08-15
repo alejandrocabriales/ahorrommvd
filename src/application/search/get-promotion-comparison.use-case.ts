@@ -39,6 +39,10 @@ export class GetPromotionComparisonUseCase {
     const promotions = await this.prisma.promotion.findMany({
       where: {
         merchantChainId,
+        // Solo promos con % : la comparación hoy-vs-7-días ordena por
+        // porcentaje, y un beneficio sin % (ej. un 2x1) no es comparable —
+        // se muestra por su carril, no compitiendo por el "mejor".
+        discountPercentage: { not: null },
         validFrom: { lte: windowEnd },
         validUntil: { gte: windowStart },
         OR: branchId

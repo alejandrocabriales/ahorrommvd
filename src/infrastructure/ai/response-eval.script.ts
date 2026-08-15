@@ -32,6 +32,7 @@ function recommendation(overrides: Partial<Recommendation>): Recommendation {
     unverifiedOnly: false,
     zoneWidened: false,
     bestWithOtherBank: null,
+    otherBenefits: [],
     ...overrides,
   };
 }
