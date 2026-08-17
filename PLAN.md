@@ -634,6 +634,59 @@ inventar algo.
 (`google-places-branch-directory.provider.spec.ts`, casos reales
 capturados a mano de Soho/Chajá/Santo Café). 152/152 tests verdes.
 
+### 🟩 Post-launch — el flujo arranca por la NECESIDAD, no por la categoría (17/08/2026)
+
+**Problema**: el pipeline empezaba en una de las 3 categorías del
+catálogo (`MvpCategoryName`) — la IA elegía `categoryName` directo desde
+el mensaje. Eso dejaba dos huecos: (a) "necesito comprar arroz y tomate"
+no tenía dónde caer, porque nombra productos y no un tipo de comercio, y
+(b) necesidad y lugar-donde-se-resuelve eran la misma cosa, así que
+ninguna necesidad podía cruzar dos categorías ni existir sin estar
+cubierta.
+
+**Capa nueva (única pieza conceptual agregada)**: `UserNeed`
+(`src/domain/intent/user-need.ts`) — `prepared_food`, `grocery`,
+`household`, `pharmacy`, `shopping`, `fuel`, `services` — con
+`categoriesForNeed()` mapeando cada una a las categorías del catálogo
+donde tiene sentido buscar. `household` mapea a DOS (`Supermercados` +
+`Farmacias`: el shampoo está en las dos) y `shopping`/`fuel`/`services`
+mapean a `[]`, que es la forma explícita de decir "la entendemos y no la
+tenemos" — el bot lo dice nombrando la necesidad en vez de empujarla a
+la categoría más parecida (reemplaza al flag `unsupportedCategory`, que
+ahora se deriva).
+
+**Lo que NO se tocó, a propósito**: los 3 scrapers, `SyncPromotionsUseCase`,
+el modelo de datos (cero migraciones), `SearchUseCase`/
+`ResolveMerchantUseCase`, el cálculo de comparación hoy-vs-7-días, el
+filtro por banco, el filtro de sucursal verificada/cercanía, y la
+memoria conversacional. El motor de promociones es el mismo: lo único
+que cambió es **quién decide en qué categorías mira**.
+
+**Cambios concretos**:
+
+- `ParsedIntent`: `categoryName`/`unsupportedCategory` → `need` + `items`
+  (productos que el usuario nombró). Prompt y JSON schema del
+  interpreter reescritos alrededor de la necesidad, con la distinción
+  "quiero comer" (prepared_food) vs "quiero comprar arroz" (grocery)
+  explícita — era el caso que fallaba.
+- `BrowseByCategoryUseCase.execute()` acepta ahora una categoría **o un
+  array** (5º parámetro opcional con la etiqueta y los productos del
+  pedido). Firma extendida, no reemplazada: las 27 llamadas viejas del
+  spec siguen andando sin tocar.
+- `Recommendation.requestedItems` viaja hasta el Response Generator, con
+  regla nueva en el prompt: mencionar los productos, **nunca** precios ni
+  stock (no los tenemos, y el usuario pidió explícitamente no inventar).
+- `PendingQuery` guarda `need` + `items`; `normalizePendingQuery()` lee
+  las filas JSON viejas (`categoryName`, sin `items`) para que un usuario
+  a mitad de conversación cuando salió el deploy no pierda el hilo.
+
+**Estado honesto de los datos**: no hay precios por producto. El MVP
+recomienda "te conviene Ta-Ta, 20% con tu tarjeta", no "el arroz sale
+$X". Eso está reflejado en el prompt del Response Generator y en un caso
+de `response-eval.script.ts` que falla si aparece una cifra en pesos.
+
+274/274 tests verdes (20 nuevos), build y lint sin errores nuevos.
+
 ## Criterio de éxito del MVP
 
 Usuario manda "Ta-Ta Pocitos" por WhatsApp → responde en <2s con

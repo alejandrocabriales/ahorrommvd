@@ -8,7 +8,8 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
   return {
     merchantName: null,
     branchHint: null,
-    categoryName: null,
+    need: null,
+    items: [],
     zone: null,
     city: null,
     amount: null,
@@ -18,7 +19,6 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     confirmsRecommendation: false,
     prefersToWait: false,
     asksLocation: false,
-    unsupportedCategory: false,
     ...overrides,
   };
 }
@@ -28,7 +28,8 @@ function context(recommendation: Recommendation): ConversationContext {
     query: {
       merchantName: null,
       branchHint: null,
-      categoryName: 'Farmacias',
+      need: 'pharmacy',
+      items: [],
       zone: null,
       amount: null,
       wantsGeneralSavings: false,
@@ -71,6 +72,7 @@ const BETTER_SOON_WITH_SAVING: Recommendation['betterSoon'] = {
 
 const BASE: Recommendation = {
   queryLabel: 'Farmacias',
+  requestedItems: [],
   zone: null,
   bestToday: null,
   alternatives: [],

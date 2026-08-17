@@ -5,7 +5,8 @@ const CONTEXT: ConversationContext = {
   query: {
     merchantName: null,
     branchHint: null,
-    categoryName: 'Farmacias',
+    need: 'pharmacy',
+    items: [],
     zone: 'Pocitos',
     amount: null,
     wantsGeneralSavings: false,

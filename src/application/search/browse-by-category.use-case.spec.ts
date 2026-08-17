@@ -107,6 +107,16 @@ function fakeGeocoder(point: GeoPoint | null = null): ZoneGeocoder {
   return { geocode: jest.fn().mockResolvedValue(point) };
 }
 
+/** El `where` con el que se consultó Prisma — para mirar por qué categorías se filtró. */
+function whereOf(
+  prisma: ReturnType<typeof buildPrisma>,
+): Record<string, unknown> {
+  const [args] = prisma.promotion.findMany.mock.calls[0] as [
+    { where: Record<string, unknown> },
+  ];
+  return args.where;
+}
+
 describe('BrowseByCategoryUseCase', () => {
   it('picks the highest % active today as bestToday, and up to 3 others as alternatives', async () => {
     const prisma = buildPrisma([
@@ -852,5 +862,111 @@ describe('BrowseByCategoryUseCase', () => {
     expect(rec.nothingFound).toBe(true);
     expect(rec.unverifiedOnly).toBe(false);
     expect(rec.otherBenefits).toHaveLength(1);
+  });
+
+  // Una necesidad puede resolverse en más de un tipo de comercio (el shampoo
+  // está en el súper y en la farmacia). El motor de promociones es el mismo:
+  // solo cambia en qué categorías mira.
+  describe('varias categorías a la vez', () => {
+    it('consulta las dos categorías en una sola query y compara sus promos entre sí', async () => {
+      const prisma = buildPrisma([
+        row({
+          merchantChainId: 'c1',
+          merchantChainName: 'Ta-Ta',
+          discountPercentage: 20,
+        }),
+        row({
+          merchantChainId: 'c2',
+          merchantChainName: 'Farmashop',
+          discountPercentage: 30,
+        }),
+      ]);
+      const useCase = new BrowseByCategoryUseCase(
+        prisma as never,
+        fakeGeocoder(),
+      );
+
+      const rec = await useCase.execute(
+        ['Supermercados', 'Farmacias'],
+        null,
+        undefined,
+      );
+
+      expect(whereOf(prisma).merchantChain).toEqual({
+        category: { name: { in: ['Supermercados', 'Farmacias'] } },
+      });
+      // La mejor gana sin importar de qué categoría venga — no hay una
+      // categoría "principal".
+      expect(rec.bestToday?.merchantChainName).toBe('Farmashop');
+      expect(rec.alternatives.map((a) => a.merchantChainName)).toEqual([
+        'Ta-Ta',
+      ]);
+    });
+
+    it('deja pasar el pedido del usuario (etiqueta y productos) a la recomendación', async () => {
+      const prisma = buildPrisma([
+        row({
+          merchantChainId: 'c1',
+          merchantChainName: 'Ta-Ta',
+          discountPercentage: 20,
+        }),
+      ]);
+      const useCase = new BrowseByCategoryUseCase(
+        prisma as never,
+        fakeGeocoder(),
+      );
+
+      const rec = await useCase.execute(
+        ['Supermercados'],
+        null,
+        undefined,
+        undefined,
+        { label: 'supermercados', items: ['arroz', 'tomate'] },
+      );
+
+      expect(rec.queryLabel).toBe('supermercados');
+      expect(rec.requestedItems).toEqual(['arroz', 'tomate']);
+    });
+
+    it('no cae en "todas las categorías" cuando la lista viene vacía — [] es "no hay dónde buscar", no "buscá en todo"', async () => {
+      // Sin esto, una necesidad que no cubrimos (categoriesForNeed devuelve
+      // []) saltearía el filtro y terminaría ofreciendo promos de
+      // supermercado a quien pidió una ferretería.
+      const prisma = buildPrisma([
+        row({
+          merchantChainId: 'c1',
+          merchantChainName: 'Ta-Ta',
+          discountPercentage: 20,
+        }),
+      ]);
+      const useCase = new BrowseByCategoryUseCase(
+        prisma as never,
+        fakeGeocoder(),
+      );
+
+      await useCase.execute([], null, undefined);
+
+      expect(whereOf(prisma).merchantChain).toEqual({
+        category: { name: { in: [] } },
+      });
+    });
+
+    it('sigue mirando las 3 categorías del MVP juntas cuando no hay ninguna puntual', async () => {
+      const prisma = buildPrisma([
+        row({
+          merchantChainId: 'c1',
+          merchantChainName: 'Ta-Ta',
+          discountPercentage: 20,
+        }),
+      ]);
+      const useCase = new BrowseByCategoryUseCase(
+        prisma as never,
+        fakeGeocoder(),
+      );
+
+      await useCase.execute(null, null, undefined);
+
+      expect(whereOf(prisma).merchantChain).toBeUndefined();
+    });
   });
 });

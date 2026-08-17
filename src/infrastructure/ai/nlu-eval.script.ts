@@ -17,7 +17,8 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
   return {
     merchantName: null,
     branchHint: null,
-    categoryName: null,
+    need: null,
+    items: [],
     zone: null,
     city: null,
     amount: null,
@@ -27,7 +28,6 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     confirmsRecommendation: false,
     prefersToWait: false,
     asksLocation: false,
-    unsupportedCategory: false,
     ...overrides,
   };
 }
@@ -48,15 +48,55 @@ const CASES: EvalCase[] = [
   },
   {
     message: 'Voy al súper',
-    expected: intent({ categoryName: 'Supermercados' }),
+    expected: intent({ need: 'grocery' }),
   },
   {
     message: 'Necesito una farmacia',
-    expected: intent({ categoryName: 'Farmacias' }),
+    expected: intent({ need: 'pharmacy' }),
   },
   {
     message: 'Quiero comer algo rico',
-    expected: intent({ categoryName: 'Restaurantes' }),
+    expected: intent({ need: 'prepared_food' }),
+  },
+  {
+    // El caso fundacional de la necesidad: nombra productos, NO un tipo de
+    // comercio. Con la versión vieja (la IA elegía la categoría directo) esto
+    // no tenía a dónde caer.
+    message: 'Necesito comprar arroz y tomate',
+    expected: intent({ need: 'grocery', items: ['arroz', 'tomate'] }),
+  },
+  {
+    message: 'Necesito comprar arroz y tomate y tengo una tarjeta Itaú',
+    expected: intent({
+      need: 'grocery',
+      items: ['arroz', 'tomate'],
+      banks: ['Itaú'],
+    }),
+  },
+  {
+    // Misma familia (comida) que el anterior, necesidad distinta: acá quiere
+    // comida ya hecha, no ingredientes.
+    message: 'Quiero comer',
+    expected: intent({ need: 'prepared_food' }),
+  },
+  {
+    message: 'me falta leche y fideos',
+    expected: intent({ need: 'grocery', items: ['leche', 'fideos'] }),
+  },
+  {
+    message: 'necesito shampoo y papel higiénico',
+    expected: intent({
+      need: 'household',
+      items: ['shampoo', 'papel higiénico'],
+    }),
+  },
+  {
+    message: 'quiero comprar una camisa',
+    expected: intent({ need: 'shopping', items: ['camisa'] }),
+  },
+  {
+    message: 'quiero cargar combustible',
+    expected: intent({ need: 'fuel' }),
   },
   {
     message: 'Voy a Punta Carretas',
@@ -72,7 +112,7 @@ const CASES: EvalCase[] = [
   },
   {
     message: 'quiero comer algo, estoy en Barrio Sur',
-    expected: intent({ categoryName: 'Restaurantes', zone: 'Barrio Sur' }), // barrio de Montevideo, NUNCA va en city
+    expected: intent({ need: 'prepared_food', zone: 'Barrio Sur' }), // barrio de Montevideo, NUNCA va en city
   },
   {
     message: 'tengo Itaú y Santander',
@@ -97,11 +137,11 @@ const CASES: EvalCase[] = [
   },
   {
     message: 'mostrame todas las promos de farmacias',
-    expected: intent({ categoryName: 'Farmacias', showAllBanks: true }),
+    expected: intent({ need: 'pharmacy', showAllBanks: true }),
   },
   {
     message: 'quiero comer de todo, tengo hambre',
-    expected: intent({ categoryName: 'Restaurantes' }), // "de todo" != pedir todos los bancos
+    expected: intent({ need: 'prepared_food' }), // "de todo" != pedir todos los bancos
   },
   {
     message: 'Farmashop 1500',
@@ -118,21 +158,24 @@ const CASES: EvalCase[] = [
   {
     // Bug real en vivo: esto se estaba interpretando como wantsGeneralSavings
     // y terminaba mezclando Restaurantes + Farmacias en la respuesta, como
-    // si el usuario hubiese pedido "lo mejor de todo Montevideo".
+    // si el usuario hubiese pedido "lo mejor de todo Montevideo". Una
+    // verdulería es alimentos -> grocery; el backend resuelve dónde.
     message: 'necesito buscar descuentos en verdulerías',
-    expected: intent({ unsupportedCategory: true }),
+    expected: intent({ need: 'grocery' }),
   },
   {
+    // Ferretería NO es grocery por parecido: es una necesidad que entendemos
+    // y no podemos responder todavía, y eso hay que poder decirlo.
     message: 'dónde hay una ferretería con descuento',
-    expected: intent({ unsupportedCategory: true }),
+    expected: intent({ need: 'shopping' }),
   },
   {
     message: 'tengo que hacer el súper',
-    expected: intent({ categoryName: 'Supermercados' }),
+    expected: intent({ need: 'grocery' }),
   },
   {
     message: 'quiero salir a comer',
-    expected: intent({ categoryName: 'Restaurantes' }),
+    expected: intent({ need: 'prepared_food' }),
   },
   { message: 'hola', expected: intent({}) },
   {

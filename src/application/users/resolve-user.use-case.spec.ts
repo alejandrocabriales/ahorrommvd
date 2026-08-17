@@ -34,9 +34,11 @@ describe('ResolveUserUseCase', () => {
     const pendingQuery = {
       merchantName: null,
       branchHint: null,
-      categoryName: 'Restaurantes',
+      need: 'prepared_food',
+      items: [],
       zone: 'Barrio Sur',
       amount: null,
+      wantsGeneralSavings: false,
     };
     const prisma = {
       user: {
@@ -56,17 +58,53 @@ describe('ResolveUserUseCase', () => {
     expect(result?.pendingQuery).toEqual(pendingQuery);
   });
 
+  it('reads a pending query saved before UserNeed existed (categoryName, no items)', async () => {
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          banks: [],
+          pendingQuery: {
+            merchantName: null,
+            branchHint: null,
+            categoryName: 'Restaurantes',
+            zone: 'Barrio Sur',
+            amount: null,
+          },
+          conversationContext: null,
+          knownZone: null,
+        }),
+      },
+    };
+    const useCase = new ResolveUserUseCase(prisma as never);
+
+    const result = await useCase.execute('598');
+
+    // La fila vieja se entiende igual: nadie río abajo tiene que saber que
+    // existió `categoryName`.
+    expect(result?.pendingQuery).toEqual({
+      merchantName: null,
+      branchHint: null,
+      need: 'prepared_food',
+      items: [],
+      zone: 'Barrio Sur',
+      amount: null,
+      wantsGeneralSavings: false,
+    });
+  });
+
   it('surfaces the conversation context and known zone when present', async () => {
     const conversationContext = {
       query: {
         merchantName: null,
         branchHint: null,
-        categoryName: 'Farmacias',
+        need: 'pharmacy',
+        items: [],
         zone: null,
         amount: null,
         wantsGeneralSavings: false,
       },
-      recommendation: { queryLabel: 'Farmacias' },
+      recommendation: { queryLabel: 'farmacias' },
       updatedAt: '2026-08-12T12:00:00.000Z',
     };
     const prisma = {

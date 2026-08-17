@@ -49,8 +49,17 @@ export interface BetterSoon {
  * promociones."
  */
 export interface Recommendation {
-  /** Qué preguntó el usuario, tal cual lo entendimos (ej. "Ta-Ta Pocitos", "Restaurantes"). */
+  /** Qué preguntó el usuario, tal cual lo entendimos (ej. "Ta-Ta Pocitos", "supermercados", "lugares para comer"). */
   queryLabel: string;
+  /**
+   * Productos concretos que el usuario nombró ("arroz", "tomate") — para que
+   * la respuesta hable de lo que él pidió y no de "la categoría
+   * Supermercados". SOLO eso: no tenemos precios ni stock por producto, así
+   * que el Response Generator no puede afirmar que el comercio los tenga, ni
+   * cuánto salen, ni comparar precios entre comercios. Vacío en la mayoría de
+   * las consultas.
+   */
+  requestedItems: string[];
   /** Barrio que el usuario mencionó, si lo hizo — informativo, NO implica que filtramos por cercanía real. */
   zone: string | null;
   bestToday: RecommendationOption | null;

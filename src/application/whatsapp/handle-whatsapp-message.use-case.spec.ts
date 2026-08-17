@@ -26,7 +26,8 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
   return {
     merchantName: null,
     branchHint: null,
-    categoryName: null,
+    need: null,
+    items: [],
     zone: null,
     city: null,
     amount: null,
@@ -36,7 +37,6 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     confirmsRecommendation: false,
     prefersToWait: false,
     asksLocation: false,
-    unsupportedCategory: false,
     ...overrides,
   };
 }
@@ -71,6 +71,7 @@ const TODAY_PROMO: PromotionSummary = {
 
 const DEFAULT_RECOMMENDATION: Recommendation = {
   queryLabel: 'Farmacias',
+  requestedItems: [],
   zone: null,
   bestToday: {
     merchantChainName: 'Farmashop',
@@ -427,16 +428,17 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
   it('browses by category (passing zone+userId through) and sends the AI-generated recommendation', async () => {
     const { useCase, browseByCategory, sender } = build(
-      intent({ categoryName: 'Farmacias' }),
+      intent({ need: 'pharmacy' }),
     );
 
     await useCase.execute('598', 'necesito una farmacia');
 
     expect(browseByCategory.execute).toHaveBeenCalledWith(
-      'Farmacias',
+      ['Farmacias'],
       'Pocitos', // default de KNOWN_USER.knownZone, el mensaje no trajo uno propio
       'user-1',
       undefined,
+      { label: 'farmacias', items: [] },
     );
     expect(sender.sendTextMessage).toHaveBeenCalledWith(
       '598',
@@ -444,18 +446,129 @@ describe('HandleWhatsAppMessageUseCase', () => {
     );
   });
 
+  // La reorientación del producto: se arranca desde lo que el usuario
+  // NECESITA, no desde una categoría del catálogo. La necesidad decide dónde
+  // buscar; las promos de los 3 bancos siguen siendo la misma capa
+  // transversal de siempre.
+  describe('parte de la necesidad del usuario, no de la categoría', () => {
+    it('resuelve "necesito comprar arroz y tomate" como supermercados, con los productos a la vista', async () => {
+      const { useCase, browseByCategory, sender } = build(
+        intent({ need: 'grocery', items: ['arroz', 'tomate'] }),
+      );
+
+      await useCase.execute('598', 'necesito comprar arroz y tomate');
+
+      expect(browseByCategory.execute).toHaveBeenCalledWith(
+        ['Supermercados'],
+        'Pocitos',
+        'user-1',
+        undefined,
+        { label: 'supermercados', items: ['arroz', 'tomate'] },
+      );
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        DEFAULT_AI_REPLY,
+      );
+    });
+
+    it('distingue "quiero comer" (comida hecha) de "quiero comprar arroz" (ingredientes) — las dos son comida y NO son lo mismo', async () => {
+      const comer = build(intent({ need: 'prepared_food' }));
+      await comer.useCase.execute('598', 'quiero comer');
+
+      const comprar = build(intent({ need: 'grocery', items: ['arroz'] }));
+      await comprar.useCase.execute('598', 'quiero comprar arroz');
+
+      expect(comer.browseByCategory.execute).toHaveBeenCalledWith(
+        ['Restaurantes'],
+        expect.anything(),
+        expect.anything(),
+        undefined,
+        expect.anything(),
+      );
+      expect(comprar.browseByCategory.execute).toHaveBeenCalledWith(
+        ['Supermercados'],
+        expect.anything(),
+        expect.anything(),
+        undefined,
+        expect.anything(),
+      );
+    });
+
+    it('busca en más de una categoría cuando la necesidad se resuelve en varias (shampoo: súper y farmacia)', async () => {
+      const { useCase, browseByCategory } = build(
+        intent({ need: 'household', items: ['shampoo'] }),
+      );
+
+      await useCase.execute('598', 'necesito shampoo');
+
+      expect(browseByCategory.execute).toHaveBeenCalledWith(
+        ['Supermercados', 'Farmacias'],
+        'Pocitos',
+        'user-1',
+        undefined,
+        expect.objectContaining({ items: ['shampoo'] }),
+      );
+    });
+
+    it('dice que no tiene nada para una necesidad que entiende pero no puede responder, nombrándola — sin empujarla a la categoría más parecida', async () => {
+      const { useCase, browseByCategory, sender, saveConversationContext } =
+        build(intent({ need: 'shopping', items: ['camisa'] }));
+
+      await useCase.execute('598', 'quiero comprar una camisa');
+
+      expect(browseByCategory.execute).not.toHaveBeenCalled();
+      expect(sender.sendTextMessage).toHaveBeenCalledWith(
+        '598',
+        expect.stringContaining('ropa y artículos de tienda'),
+      );
+      expect(saveConversationContext.execute).not.toHaveBeenCalled();
+    });
+
+    it('recuerda los productos en un seguimiento que no los repite ("600 pesos")', async () => {
+      const context: ConversationContext = {
+        query: {
+          merchantName: null,
+          branchHint: null,
+          need: 'grocery',
+          items: ['arroz', 'tomate'],
+          zone: null,
+          amount: null,
+          wantsGeneralSavings: false,
+        },
+        recommendation: DEFAULT_RECOMMENDATION,
+        updatedAt: minutesAgo(2),
+      };
+      const { useCase, browseByCategory } = build(
+        intent({ amount: 600 }),
+        undefined,
+        { ...KNOWN_USER, conversationContext: context },
+      );
+
+      await useCase.execute('598', '600 pesos');
+
+      expect(browseByCategory.execute).toHaveBeenCalledWith(
+        ['Supermercados'],
+        'Pocitos',
+        'user-1',
+        600,
+        { label: 'supermercados', items: ['arroz', 'tomate'] },
+      );
+    });
+  });
+
   it('threads the mentioned zone through to category browsing', async () => {
     const { useCase, browseByCategory } = build(
-      intent({ categoryName: 'Restaurantes', zone: 'Barrio Sur' }),
+      intent({ need: 'prepared_food', zone: 'Barrio Sur' }),
     );
 
     await useCase.execute('598', 'quiero comer algo en barrio sur');
 
     expect(browseByCategory.execute).toHaveBeenCalledWith(
-      'Restaurantes',
+      ['Restaurantes'],
       'Barrio Sur',
       'user-1',
       undefined,
+      { label: 'lugares para comer', items: [] },
     );
   });
 
@@ -466,10 +579,10 @@ describe('HandleWhatsAppMessageUseCase', () => {
       responseGenerator,
       sender,
       saveConversationContext,
-    } = build(intent({ categoryName: 'Restaurantes' }));
+    } = build(intent({ need: 'prepared_food' }));
     (browseByCategory.execute as jest.Mock).mockResolvedValue({
       ...DEFAULT_RECOMMENDATION,
-      queryLabel: 'Restaurantes',
+      queryLabel: 'lugares para comer',
       bestToday: null,
       nothingFound: true,
       unverifiedOnly: true,
@@ -479,7 +592,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     expect(sender.sendTextMessage).toHaveBeenCalledWith(
       '598',
-      expect.stringContaining('Restaurantes'),
+      expect.stringContaining('lugares para comer'),
     );
     expect(sender.sendTextMessage).toHaveBeenCalledWith(
       '598',
@@ -497,14 +610,14 @@ describe('HandleWhatsAppMessageUseCase', () => {
     expect(saveConversationContext.execute).toHaveBeenCalledWith(
       '598',
       expect.objectContaining({
-        query: expect.objectContaining({ categoryName: 'Restaurantes' }),
+        query: expect.objectContaining({ need: 'prepared_food' }),
       }),
     );
   });
 
   it('cuando lo único que hay con sus tarjetas es un beneficio sin % (2x1), lo pone adelante en vez de abrir con "no tengo nada"', async () => {
     const { useCase, browseByCategory, sender } = build(
-      intent({ categoryName: 'Restaurantes' }),
+      intent({ need: 'prepared_food' }),
     );
     (browseByCategory.execute as jest.Mock).mockResolvedValue({
       ...DEFAULT_RECOMMENDATION,
@@ -541,7 +654,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
   it('cuando con sus tarjetas no hay nada, dice qué hay con otro banco en vez de cortar con un "no tengo nada"', async () => {
     const { useCase, browseByCategory, sender } = build(
-      intent({ categoryName: 'Restaurantes' }),
+      intent({ need: 'prepared_food' }),
     );
     (browseByCategory.execute as jest.Mock).mockResolvedValue({
       ...DEFAULT_RECOMMENDATION,
@@ -656,7 +769,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     it('bypasses the filter for category browsing too, and does not touch saved banks', async () => {
       const { useCase, browseByCategory, setUserBanks } = build(
-        intent({ categoryName: 'Farmacias', showAllBanks: true }),
+        intent({ need: 'pharmacy', showAllBanks: true }),
         undefined,
         KNOWN_USER,
       );
@@ -664,17 +777,18 @@ describe('HandleWhatsAppMessageUseCase', () => {
       await useCase.execute('598', 'mostrame todas las ofertas de farmacias');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Farmacias',
+        ['Farmacias'],
         'Pocitos', // default de KNOWN_USER.knownZone
         undefined,
         undefined,
+        { label: 'farmacias', items: [] },
       );
       expect(setUserBanks.execute).not.toHaveBeenCalled();
     });
 
     it('does not blame the user cards for an empty answer when the search ignored them', async () => {
       const { useCase, browseByCategory, sender } = build(
-        intent({ categoryName: 'Restaurantes', showAllBanks: true }),
+        intent({ need: 'prepared_food', showAllBanks: true }),
         undefined,
         KNOWN_USER,
       );
@@ -716,7 +830,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
       expect(savePendingQuery.execute).toHaveBeenCalledWith('598', {
         merchantName: 'Ta-Ta',
         branchHint: 'Pocitos',
-        categoryName: null,
+        need: null,
+        items: [],
         zone: null,
         amount: null,
         wantsGeneralSavings: false,
@@ -729,7 +844,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     it('asks before browsing a category too (ej. "comida en Barrio Sur")', async () => {
       const { useCase, browseByCategory, savePendingQuery, sender } = build(
-        intent({ categoryName: 'Restaurantes', zone: 'Barrio Sur' }),
+        intent({ need: 'prepared_food', zone: 'Barrio Sur' }),
         undefined,
         UNKNOWN_USER,
       );
@@ -740,7 +855,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
       expect(savePendingQuery.execute).toHaveBeenCalledWith('598', {
         merchantName: null,
         branchHint: null,
-        categoryName: 'Restaurantes',
+        need: 'prepared_food',
+        items: [],
         zone: 'Barrio Sur',
         amount: null,
         wantsGeneralSavings: false,
@@ -764,7 +880,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
       expect(savePendingQuery.execute).toHaveBeenCalledWith('598', {
         merchantName: null,
         branchHint: null,
-        categoryName: null,
+        need: null,
+        items: [],
         zone: null,
         amount: null,
         wantsGeneralSavings: true,
@@ -781,7 +898,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
         // que default-ear, y sin zone el nuevo gate de "¿por qué zona
         // andás?" dispararía antes de llegar acá.
         intent({
-          categoryName: 'Restaurantes',
+          need: 'prepared_food',
           showAllBanks: true,
           zone: 'Barrio Sur',
         }),
@@ -795,10 +912,11 @@ describe('HandleWhatsAppMessageUseCase', () => {
       );
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Restaurantes',
+        ['Restaurantes'],
         'Barrio Sur',
         undefined,
         undefined,
+        { label: 'lugares para comer', items: [] },
       );
       expect(savePendingQuery.execute).not.toHaveBeenCalled();
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
@@ -810,7 +928,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
     const PENDING_RESTAURANTES: PendingQuery = {
       merchantName: null,
       branchHint: null,
-      categoryName: 'Restaurantes',
+      need: 'prepared_food',
+      items: [],
       zone: 'Barrio Sur',
       amount: null,
       wantsGeneralSavings: false,
@@ -834,10 +953,11 @@ describe('HandleWhatsAppMessageUseCase', () => {
       await useCase.execute('598', 'tengo Itaú');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Restaurantes',
+        ['Restaurantes'],
         'Barrio Sur',
         'user-1',
         undefined,
+        { label: 'lugares para comer', items: [] },
       );
       expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
@@ -863,10 +983,11 @@ describe('HandleWhatsAppMessageUseCase', () => {
       await useCase.execute('598', 'dame todas');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Restaurantes',
+        ['Restaurantes'],
         'Barrio Sur',
         undefined,
         undefined,
+        { label: 'lugares para comer', items: [] },
       );
       expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
@@ -906,7 +1027,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
   describe('pregunta el barrio antes de contestar (sin zona conocida)', () => {
     it('asks for the zone before recommending a named category, and saves the query as pending', async () => {
       const { useCase, browseByCategory, savePendingQuery, sender } = build(
-        intent({ categoryName: 'Restaurantes' }),
+        intent({ need: 'prepared_food' }),
         undefined,
         { ...KNOWN_USER, knownZone: null },
       );
@@ -917,7 +1038,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
       expect(savePendingQuery.execute).toHaveBeenCalledWith('598', {
         merchantName: null,
         branchHint: null,
-        categoryName: 'Restaurantes',
+        need: 'prepared_food',
+        items: [],
         zone: null,
         amount: null,
         wantsGeneralSavings: false,
@@ -948,7 +1070,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     it('does not ask when a bank question is still pending — banks go first', async () => {
       const { useCase, browseByCategory, savePendingQuery, sender } = build(
-        intent({ categoryName: 'Restaurantes' }),
+        intent({ need: 'prepared_food' }),
         undefined,
         UNKNOWN_USER,
       );
@@ -970,7 +1092,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
       const PENDING_NO_ZONE: PendingQuery = {
         merchantName: null,
         branchHint: null,
-        categoryName: 'Restaurantes',
+        need: 'prepared_food',
+        items: [],
         zone: null,
         amount: null,
         wantsGeneralSavings: false,
@@ -991,10 +1114,11 @@ describe('HandleWhatsAppMessageUseCase', () => {
       await useCase.execute('598', 'Pocitos');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Restaurantes',
+        ['Restaurantes'],
         'Pocitos',
         'user-1',
         undefined,
+        { label: 'lugares para comer', items: [] },
       );
       expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
       expect(sender.sendTextMessage).toHaveBeenCalledWith(
@@ -1040,7 +1164,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     it('declines a category request honestly instead of applying Montevideo data to a different city', async () => {
       const { useCase, browseByCategory, sender } = build(
-        intent({ categoryName: 'Farmacias' }),
+        intent({ need: 'pharmacy' }),
         undefined,
         { ...KNOWN_USER, knownCity: 'Maldonado' },
       );
@@ -1098,7 +1222,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
     const FARMACIAS_CONTEXT_QUERY: PendingQuery = {
       merchantName: null,
       branchHint: null,
-      categoryName: 'Farmacias',
+      need: 'pharmacy',
+      items: [],
       zone: null,
       amount: null,
       wantsGeneralSavings: false,
@@ -1130,16 +1255,17 @@ describe('HandleWhatsAppMessageUseCase', () => {
       await useCase.execute('598', 'capaz gasto 600 pesos');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Farmacias',
+        ['Farmacias'],
         'Pocitos', // default de KNOWN_USER.knownZone (el contexto guardado no traía uno)
         'user-1',
         600,
+        { label: 'farmacias', items: [] },
       );
       expect(saveConversationContext.execute).toHaveBeenCalledWith(
         '598',
         expect.objectContaining({
           query: expect.objectContaining({
-            categoryName: 'Farmacias',
+            need: 'pharmacy',
             amount: 600,
           }),
           recommendation: DEFAULT_RECOMMENDATION,
@@ -1157,10 +1283,11 @@ describe('HandleWhatsAppMessageUseCase', () => {
       await useCase.execute('598', 'y en Pocitos?');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Farmacias',
+        ['Farmacias'],
         'Pocitos',
         'user-1',
         undefined,
+        { label: 'farmacias', items: [] },
       );
     });
 
@@ -1248,10 +1375,11 @@ describe('HandleWhatsAppMessageUseCase', () => {
       await useCase.execute('598', 'mejor espero');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Farmacias',
+        ['Farmacias'],
         'Pocitos', // default de KNOWN_USER.knownZone
         'user-1',
         undefined,
+        { label: 'farmacias', items: [] },
       );
       expect(responseGenerator.generate).toHaveBeenCalled();
     });
@@ -1271,10 +1399,11 @@ describe('HandleWhatsAppMessageUseCase', () => {
       await useCase.execute('598', 'me sirve');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Farmacias',
+        ['Farmacias'],
         'Pocitos', // default de KNOWN_USER.knownZone
         'user-1',
         undefined,
+        { label: 'farmacias', items: [] },
       );
       expect(responseGenerator.generate).toHaveBeenCalled();
       expect(clearPendingQuery.execute).toHaveBeenCalledWith('598');
@@ -1282,7 +1411,7 @@ describe('HandleWhatsAppMessageUseCase', () => {
 
     it('defaults to the known zone when neither the message nor recent context mention one', async () => {
       const { useCase, browseByCategory } = build(
-        intent({ categoryName: 'Farmacias' }),
+        intent({ need: 'pharmacy' }),
         undefined,
         { ...KNOWN_USER, knownZone: 'Pocitos' },
       );
@@ -1290,10 +1419,11 @@ describe('HandleWhatsAppMessageUseCase', () => {
       await useCase.execute('598', 'necesito una farmacia');
 
       expect(browseByCategory.execute).toHaveBeenCalledWith(
-        'Farmacias',
+        ['Farmacias'],
         'Pocitos',
         'user-1',
         undefined,
+        { label: 'farmacias', items: [] },
       );
     });
 
@@ -1357,7 +1487,8 @@ describe('HandleWhatsAppMessageUseCase', () => {
       expect(savePendingQuery.execute).toHaveBeenCalledWith('598', {
         merchantName: null,
         branchHint: null,
-        categoryName: null,
+        need: null,
+        items: [],
         zone: 'Pocitos',
         amount: null,
         wantsGeneralSavings: false,
