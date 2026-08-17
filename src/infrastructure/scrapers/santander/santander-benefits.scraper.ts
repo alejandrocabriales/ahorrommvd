@@ -3,7 +3,11 @@ import * as cheerio from 'cheerio';
 import { PaymentType } from '../../../../generated/prisma/client';
 import { BankScraper } from '../../../domain/scraping/bank-scraper.port';
 import { MvpCategoryName } from '../../../domain/scraping/mvp-category';
-import { ScrapedPromotion } from '../../../domain/scraping/scraped-promotion';
+import { isInMontevideoArea } from '../../../domain/geocoding/montevideo-area';
+import {
+  ScrapedBranch,
+  ScrapedPromotion,
+} from '../../../domain/scraping/scraped-promotion';
 
 const LISTING_URL = 'https://www.santander.com.uy/beneficios';
 const BASE_URL = 'https://www.santander.com.uy';
@@ -14,6 +18,15 @@ const USER_AGENT =
 // los días"); tratamos cada corrida como una foto de "vigente ahora" y le
 // damos una ventana rodante, total dependemos del cron diario para refrescar.
 const ROLLING_WINDOW_DAYS = 30;
+
+// Fichas de comercio pedidas en paralelo. 6 mantiene la corrida en menos de
+// medio minuto sin castigar al sitio del banco.
+const DETAIL_CONCURRENCY = 6;
+
+// "Departamento de Canelones" y compañía: si la dirección nombra un
+// departamento que no es Montevideo, el local no nos sirve por más cerca que
+// esté en línea recta.
+const OTHER_DEPARTMENT_REGEX = /Departamento de (?!Montevideo)/i;
 
 /**
  * El listado tiene un filtro por categoría (taxonomy Drupal) que se puede
@@ -82,7 +95,95 @@ export class SantanderBenefitsScraper implements BankScraper {
       }
     }
 
-    return [...byUrl.values()];
+    const promotions = [...byUrl.values()];
+    await this.attachBranches(promotions);
+    return promotions;
+  }
+
+  /**
+   * La ficha de cada comercio (`/beneficios/<slug>`) tiene una pestaña
+   * "Locales" con nombre, calle y un link a Google Maps con las coordenadas
+   * exactas. Es el mismo dato que el backfill de Places intenta adivinar
+   * por nombre, pero dicho por el banco que paga el descuento — y para 81
+   * de los 125 restaurantes de Santander, Places no lo encontraba.
+   *
+   * Es una petición por comercio, así que van de a tandas: en serie son un
+   * par de minutos, y este scraper corre dentro del cron diario.
+   */
+  private async attachBranches(promotions: ScrapedPromotion[]): Promise<void> {
+    const withDetail = promotions.filter((p) =>
+      p.sourceUrl.startsWith(`${BASE_URL}/beneficios/`),
+    );
+
+    for (let i = 0; i < withDetail.length; i += DETAIL_CONCURRENCY) {
+      await Promise.all(
+        withDetail.slice(i, i + DETAIL_CONCURRENCY).map(async (promo) => {
+          try {
+            const response = await fetch(promo.sourceUrl, {
+              headers: { 'User-Agent': USER_AGENT },
+            });
+            if (!response.ok) {
+              throw new Error(`${response.status} ${response.statusText}`);
+            }
+            promo.branches = this.parseBranches(await response.text());
+          } catch (err) {
+            // Una ficha caída no puede costar la promo entera: sin
+            // sucursales, la cadena sigue el camino de siempre (backfill de
+            // Places).
+            this.logger.warn(
+              `No pude leer los locales de ${promo.merchantChainName}: ${err}`,
+            );
+          }
+        }),
+      );
+    }
+  }
+
+  /**
+   * Los locales de una ficha. Se descartan los de fuera de Montevideo
+   * (Ruta Gourmet incluye Punta del Este y Colonia) y se desambiguan los
+   * nombres repetidos: Santander llama a todos los locales igual que a la
+   * cadena ("Ramona", "Ramona"), y el unique de `Branch` es cadena+nombre,
+   * así que sin esto el segundo local pisaría al primero.
+   */
+  parseBranches(html: string): ScrapedBranch[] {
+    const $ = cheerio.load(html);
+    const branches: ScrapedBranch[] = [];
+    const seenNames = new Map<string, number>();
+
+    $('article.node--type-sitios-de-interes').each((_i, el) => {
+      const name = $(el).find('.field--name-title').first().text().trim();
+      const address = $(el)
+        .find('.field--name-field-ubicacion')
+        .first()
+        .text()
+        .replace(/\s+/g, ' ')
+        .trim();
+      const href = $(el).find('a[href*="/maps/dir//"]').first().attr('href');
+      const coords = href?.match(/\/maps\/dir\/\/(-?\d+\.\d+),(-?\d+\.\d+)/);
+      if (!name || !coords) return;
+
+      const latitude = Number(coords[1]);
+      const longitude = Number(coords[2]);
+      if (!isInMontevideoArea({ latitude, longitude })) return;
+      // El radio de 25 km se come parte del área metropolitana: Portal
+      // Américas figura a 15 km del centro pero su dirección dice
+      // "Departamento de Canelones". Cuando la dirección nombra el
+      // departamento, le creemos a ella antes que a la distancia.
+      if (OTHER_DEPARTMENT_REGEX.test(address)) return;
+
+      const repeats = seenNames.get(name) ?? 0;
+      seenNames.set(name, repeats + 1);
+
+      branches.push({
+        name: repeats === 0 || !address ? name : `${name} (${address})`,
+        address: address || undefined,
+        latitude,
+        longitude,
+      });
+    });
+
+    return branches;
   }
 
   private async fetchCategoryHtml(

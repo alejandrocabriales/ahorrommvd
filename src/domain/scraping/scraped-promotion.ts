@@ -24,6 +24,8 @@ export interface ScrapedBranch {
   name: string;
   latitude: number;
   longitude: number;
+  /** Calle, cuando el banco la publica (Santander sí, el feed de Itaú no). */
+  address?: string;
 }
 
 export interface ScrapedPromotion {
