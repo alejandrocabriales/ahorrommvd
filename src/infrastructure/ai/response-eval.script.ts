@@ -20,7 +20,8 @@ import { OpenRouterResponseGenerator } from './openrouter-response-generator.ser
 
 function recommendation(overrides: Partial<Recommendation>): Recommendation {
   return {
-    queryLabel: 'Farmacias',
+    queryLabel: 'farmacias',
+    requestedItems: [],
     zone: null,
     bestToday: null,
     alternatives: [],
@@ -101,62 +102,100 @@ function isConcise(maxWords: number): Check {
 
 const CASES: EvalCase[] = [
   {
-    label: 'zone sin neighborhood en las opciones -> igual debe mencionar el barrio (bug encontrado en vivo)',
+    label:
+      'zone sin neighborhood en las opciones -> igual debe mencionar el barrio (bug encontrado en vivo)',
     recommendation: recommendation({
       zone: 'Pocitos',
       bestToday: FARMASHOP,
       alternatives: [
-        { ...FARMASHOP, merchantChainName: 'Ta-Ta', discountPercentage: 10, bankName: 'Itaú', cardName: 'Itaú Mastercard' },
+        {
+          ...FARMASHOP,
+          merchantChainName: 'Ta-Ta',
+          discountPercentage: 10,
+          bankName: 'Itaú',
+          cardName: 'Itaú Mastercard',
+        },
       ],
     }),
     checks: [
-      { name: 'menciona "pocitos"', predicate: (t) => t.toLowerCase().includes('pocitos') },
+      {
+        name: 'menciona "pocitos"',
+        predicate: (t) => t.toLowerCase().includes('pocitos'),
+      },
       noBannedWords(),
       noRobotPhrases(),
     ],
   },
   {
-    label: 'tope aplicado -> debe explicar % teórico vs ahorro real (bug encontrado en vivo)',
+    label:
+      'tope aplicado -> debe explicar % teórico vs ahorro real (bug encontrado en vivo)',
     recommendation: recommendation({
       bestToday: FARMASHOP,
       spentAmount: 6000,
       estimatedSavingToday: { amount: 800, cappedByBank: true },
     }),
     checks: [
-      { name: 'menciona "tope"', predicate: (t) => t.toLowerCase().includes('tope') },
-      { name: 'dice el monto real ($800)', predicate: (t) => t.includes('800') },
+      {
+        name: 'menciona "tope"',
+        predicate: (t) => t.toLowerCase().includes('tope'),
+      },
+      {
+        name: 'dice el monto real ($800)',
+        predicate: (t) => t.includes('800'),
+      },
       noBannedWords(),
       noRobotPhrases(),
     ],
   },
   {
-    label: 'betterSoon con estimatedSaving -> debe comparar $ directo, no solo %',
+    label:
+      'betterSoon con estimatedSaving -> debe comparar $ directo, no solo %',
     recommendation: recommendation({
       bestToday: FARMASHOP,
       spentAmount: 600,
       estimatedSavingToday: { amount: 90, cappedByBank: false },
       betterSoon: {
-        option: { ...FARMASHOP, bankName: 'Santander', discountPercentage: 25, cardName: 'Santander Free' },
+        option: {
+          ...FARMASHOP,
+          bankName: 'Santander',
+          discountPercentage: 25,
+          cardName: 'Santander Free',
+        },
         daysFromNow: 3,
         estimatedSaving: { amount: 150, cappedByBank: false },
       },
     }),
     checks: [
-      { name: 'menciona el ahorro de hoy ($90)', predicate: (t) => t.includes('90') },
-      { name: 'menciona el ahorro esperando ($150)', predicate: (t) => t.includes('150') },
+      {
+        name: 'menciona el ahorro de hoy ($90)',
+        predicate: (t) => t.includes('90'),
+      },
+      {
+        name: 'menciona el ahorro esperando ($150)',
+        predicate: (t) => t.includes('150'),
+      },
       noBannedWords(),
       noRobotPhrases(),
     ],
   },
   {
-    label: 'asksLocation con address conocida -> debe decir la dirección real (caso "Chajá donde esta?")',
+    label:
+      'asksLocation con address conocida -> debe decir la dirección real (caso "Chajá donde esta?")',
     recommendation: recommendation({
       queryLabel: 'Chajá',
       asksLocation: true,
-      bestToday: { ...FARMASHOP, merchantChainName: 'Chajá', address: 'Bulevar España 2411', neighborhood: 'Pocitos' },
+      bestToday: {
+        ...FARMASHOP,
+        merchantChainName: 'Chajá',
+        address: 'Bulevar España 2411',
+        neighborhood: 'Pocitos',
+      },
     }),
     checks: [
-      { name: 'dice la dirección real', predicate: (t) => t.includes('Bulevar España 2411') },
+      {
+        name: 'dice la dirección real',
+        predicate: (t) => t.includes('Bulevar España 2411'),
+      },
       isConcise(35),
       noBannedWords(),
       noRobotPhrases(),
@@ -206,7 +245,7 @@ const CASES: EvalCase[] = [
     label:
       'zoneWidened -> debe admitir que en el barrio del usuario no hay nada y que lo que ofrece queda en otra parte de Montevideo (bug real: "no tengo opciones en Buceo, pero aplica en cualquier local")',
     recommendation: recommendation({
-      queryLabel: 'Restaurantes',
+      queryLabel: 'lugares para comer',
       zone: 'Buceo',
       bestToday: {
         ...FARMASHOP,
@@ -241,16 +280,57 @@ const CASES: EvalCase[] = [
     ],
   },
   {
+    label:
+      'requestedItems -> contesta lo que el usuario pidió (arroz y tomate) sin inventar precios ni stock',
+    recommendation: recommendation({
+      queryLabel: 'supermercados',
+      requestedItems: ['arroz', 'tomate'],
+      zone: 'Pocitos',
+      bestToday: {
+        ...FARMASHOP,
+        merchantChainName: 'Ta-Ta',
+        branchName: 'Ta-Ta Pocitos',
+        neighborhood: 'Pocitos',
+        address: 'Av. Brasil 2846, Montevideo',
+        bankName: 'Santander',
+        discountPercentage: 20,
+      },
+    }),
+    checks: [
+      {
+        name: 'menciona los productos que pidió',
+        predicate: (t) => {
+          const lower = t.toLowerCase();
+          return lower.includes('arroz') || lower.includes('tomate');
+        },
+      },
+      {
+        name: 'no inventa precios de productos (no tenemos precios por producto)',
+        predicate: (t) => !/\$\s?\d/.test(t),
+      },
+      {
+        name: 'recomienda el comercio concreto',
+        predicate: (t) => t.toLowerCase().includes('ta-ta'),
+      },
+      noBannedWords(),
+      noRobotPhrases(),
+    ],
+  },
+  {
     label: 'voseo natural sin caricatura (smoke test general)',
     recommendation: recommendation({ bestToday: FARMASHOP }),
     checks: [
       {
         name: 'usa voseo (tenés/podés/decime/etc)',
-        predicate: (t) => /\b(ten[eé]s|pod[eé]s|decime|fijate|quer[eé]s|busc[aá]s)\b/i.test(t),
+        predicate: (t) =>
+          /\b(ten[eé]s|pod[eé]s|decime|fijate|quer[eé]s|busc[aá]s)\b/i.test(t),
       },
       noBannedWords(),
       noRobotPhrases(),
-      { name: 'cierra con como mucho una pregunta', predicate: (t) => (t.match(/\?/g) ?? []).length <= 1 },
+      {
+        name: 'cierra con como mucho una pregunta',
+        predicate: (t) => (t.match(/\?/g) ?? []).length <= 1,
+      },
     ],
   },
 ];
@@ -290,7 +370,9 @@ async function main() {
   // Umbral bajo a propósito (texto libre, el LLM no es determinístico) —
   // el objetivo es detectar una regresión grande, no exigir 100%.
   if (checksOk / checksTotal < 0.8) {
-    console.error('\nCalidad por debajo del umbral (80%) — revisar el prompt del Response Generator.');
+    console.error(
+      '\nCalidad por debajo del umbral (80%) — revisar el prompt del Response Generator.',
+    );
     process.exitCode = 1;
   }
 }

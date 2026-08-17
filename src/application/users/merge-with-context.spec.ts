@@ -8,7 +8,8 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
   return {
     merchantName: null,
     branchHint: null,
-    categoryName: null,
+    need: null,
+    items: [],
     zone: null,
     city: null,
     amount: null,
@@ -18,7 +19,6 @@ function intent(overrides: Partial<ParsedIntent>): ParsedIntent {
     confirmsRecommendation: false,
     prefersToWait: false,
     asksLocation: false,
-    unsupportedCategory: false,
     ...overrides,
   };
 }
@@ -27,6 +27,7 @@ const NOW = new Date('2026-08-12T12:00:00.000Z');
 
 const FARMACIAS_RECOMMENDATION: Recommendation = {
   queryLabel: 'Farmacias',
+  requestedItems: [],
   zone: null,
   bestToday: {
     merchantChainName: 'Farmashop',
@@ -61,7 +62,8 @@ function contextAt(
 const FARMACIAS_QUERY: ConversationContext['query'] = {
   merchantName: null,
   branchHint: null,
-  categoryName: 'Farmacias',
+  need: 'pharmacy',
+  items: [],
   zone: null,
   amount: null,
   wantsGeneralSavings: false,
@@ -70,7 +72,8 @@ const FARMACIAS_QUERY: ConversationContext['query'] = {
 const TA_TA_QUERY: ConversationContext['query'] = {
   merchantName: 'Ta-Ta',
   branchHint: null,
-  categoryName: null,
+  need: null,
+  items: [],
   zone: null,
   amount: null,
   wantsGeneralSavings: false,
@@ -82,7 +85,8 @@ describe('mergeWithContext', () => {
     expect(result).toEqual({
       merchantName: null,
       branchHint: null,
-      categoryName: null,
+      need: null,
+      items: [],
       zone: null,
       amount: 600,
       wantsGeneralSavings: false,
@@ -92,7 +96,7 @@ describe('mergeWithContext', () => {
   it('ignores stale context (older than 30 minutes)', () => {
     const context = contextAt(31, FARMACIAS_QUERY);
     const result = mergeWithContext(intent({ amount: 600 }), context, NOW);
-    expect(result.categoryName).toBeNull();
+    expect(result.need).toBeNull();
     expect(result.amount).toBe(600);
   });
 
@@ -102,7 +106,8 @@ describe('mergeWithContext', () => {
     expect(result).toEqual({
       merchantName: null,
       branchHint: null,
-      categoryName: 'Farmacias',
+      need: 'pharmacy',
+      items: [],
       zone: null,
       amount: 600,
       wantsGeneralSavings: false,
@@ -115,7 +120,7 @@ describe('mergeWithContext', () => {
     // entendí bien qué buscás" — el tema estaba en el contexto.
     const context = contextAt(2, FARMACIAS_QUERY);
     const result = mergeWithContext(intent({ banks: ['Itaú'] }), context, NOW);
-    expect(result.categoryName).toBe('Farmacias');
+    expect(result.need).toBe('pharmacy');
   });
 
   it('retoma el tema con "dame todas" (mismo caso, sin filtro de banco)', () => {
@@ -125,7 +130,7 @@ describe('mergeWithContext', () => {
       context,
       NOW,
     );
-    expect(result.categoryName).toBe('Farmacias');
+    expect(result.need).toBe('pharmacy');
   });
 
   it('does not merge when the message opens its own topic, even with fresh context', () => {
@@ -136,7 +141,7 @@ describe('mergeWithContext', () => {
       NOW,
     );
     expect(result.merchantName).toBe('Devoto');
-    expect(result.categoryName).toBeNull();
+    expect(result.need).toBeNull();
   });
 
   it('treats a new neighborhood as a branch refinement when context was merchant-specific ("y en Pocitos?")', () => {
@@ -149,7 +154,7 @@ describe('mergeWithContext', () => {
   it('treats a new neighborhood as an informational zone when context was category-based', () => {
     const context = contextAt(2, FARMACIAS_QUERY);
     const result = mergeWithContext(intent({ zone: 'Pocitos' }), context, NOW);
-    expect(result.categoryName).toBe('Farmacias');
+    expect(result.need).toBe('pharmacy');
     expect(result.zone).toBe('Pocitos');
   });
 
@@ -160,12 +165,12 @@ describe('mergeWithContext', () => {
       context,
       NOW,
     );
-    expect(result.categoryName).toBe('Farmacias');
+    expect(result.need).toBe('pharmacy');
   });
 
   it('does not force a merge for a message with no follow-up signal at all ("hola")', () => {
     const context = contextAt(2, FARMACIAS_QUERY);
     const result = mergeWithContext(intent({}), context, NOW);
-    expect(result.categoryName).toBeNull();
+    expect(result.need).toBeNull();
   });
 });

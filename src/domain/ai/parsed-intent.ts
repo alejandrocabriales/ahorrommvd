@@ -1,5 +1,5 @@
 import { MvpBankName } from '../scraping/bank-name';
-import { MvpCategoryName } from '../scraping/mvp-category';
+import { UserNeed } from '../intent/user-need';
 
 /**
  * Intención estructurada que devuelve la IA a partir de un mensaje de
@@ -13,8 +13,24 @@ export interface ParsedIntent {
   merchantName: string | null;
   /** Sucursal o barrio mencionado junto al comercio, ej. "Pocitos" en "Ta-Ta Pocitos". */
   branchHint: string | null;
-  /** Categoría general cuando el usuario no nombra un comercio puntual, ej. "Voy al súper". */
-  categoryName: MvpCategoryName | null;
+  /**
+   * QUÉ NECESITA el usuario cuando no nombra un comercio puntual, ej. "quiero
+   * comer" -> prepared_food, "necesito arroz y tomate" -> grocery. Es la
+   * necesidad en sus términos, NO una categoría del catálogo: el mapeo
+   * necesidad -> categorías donde buscar lo hace el backend
+   * (`categoriesForNeed`), no la IA. Incluye necesidades que todavía no
+   * podemos responder (shopping, fuel, services) justamente para poder
+   * decirlo en vez de forzarlas a la categoría más parecida.
+   */
+  need: UserNeed | null;
+  /**
+   * Productos concretos que el usuario nombró, tal cual los escribió
+   * ("arroz", "tomate"). Solo para entender mejor el pedido y poder
+   * mencionarlos en la respuesta — NO tenemos precios ni stock por producto,
+   * así que nada downstream puede afirmar que un comercio los tiene o cuánto
+   * salen. Vacío si no nombró ninguno.
+   */
+  items: string[];
   /** Zona/barrio mencionado sin comercio específico, ej. "Voy a Punta Carretas". */
   zone: string | null;
   /**
@@ -31,7 +47,7 @@ export interface ParsedIntent {
   banks: MvpBankName[] | null;
   /** true si el usuario pidió explícitamente ver ofertas de todos los bancos, no solo los suyos (ej. "dame todas las ofertas"). */
   showAllBanks: boolean;
-  /** true si pide ahorrar/la mejor opción en general, sin nombrar comercio ni categoría (ej. "quiero ahorrar hoy", "qué me conviene hacer"). */
+  /** true si pide ahorrar/la mejor opción en general, sin nombrar comercio ni necesidad (ej. "quiero ahorrar hoy", "qué me conviene hacer"). */
   wantsGeneralSavings: boolean;
   /** true si el mensaje acepta/confirma la recomendación anterior de la charla, sin agregar comercio/categoría propios (ej. "me sirve", "dale", "voy ahora", "listo"). Solo tiene efecto si hay contexto reciente que confirmar. */
   confirmsRecommendation: boolean;
@@ -39,12 +55,4 @@ export interface ParsedIntent {
   prefersToWait: boolean;
   /** true si el usuario pregunta explícitamente dónde queda/está un comercio (ej. "Chajá donde esta?", "¿dónde queda Ta-Ta?", "en qué dirección está"). merchantName igual debe extraerse si lo nombra — esto es una pregunta ADEMÁS del comercio, no en vez de. */
   asksLocation: boolean;
-  /**
-   * true si el usuario pide un TIPO de comercio puntual que no es ninguna de
-   * las 3 categorías del MVP (ej. "verdulerías", "ferretería", "ropa") — a
-   * diferencia de wantsGeneralSavings (que es "sin nombrar categoría"), acá
-   * SÍ nombró una, solo que no la tenemos. false en cualquier otro caso,
-   * incluso si ya hay merchantName o categoryName.
-   */
-  unsupportedCategory: boolean;
 }

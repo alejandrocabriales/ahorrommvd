@@ -72,17 +72,33 @@ function bestPerChain(candidates: CategoryCandidate[]): CategoryCandidate[] {
 }
 
 /**
+ * Contexto del pedido tal como lo hizo el usuario, para que la respuesta
+ * hable de eso y no del nombre interno de la categoría. Lo arma quien
+ * traduce la necesidad a categorías (ver `UserNeed`); este caso de uso no
+ * sabe nada de necesidades, solo de dónde buscar.
+ */
+export interface BrowseRequestContext {
+  /** Cómo nombrarle al usuario lo que pidió, ej. "lugares para comer". */
+  label?: string;
+  /** Productos que nombró ("arroz", "tomate") — informativo, no hay precios. */
+  items?: string[];
+}
+
+/**
  * Cuando el usuario no nombra un comercio puntual ("voy al súper",
  * "necesito una farmacia") no hay nada que resolver con
  * ResolveMerchantUseCase — arma una Recommendation con la mejor opción de
- * la categoría hoy, hasta 3 alternativas, y si conviene esperar (comparando
- * el mejor de la categoría hoy contra el mejor de la categoría en los
+ * hoy entre las categorías donde tiene sentido buscar, hasta 3 alternativas,
+ * y si conviene esperar (comparando el mejor de hoy contra el mejor de los
  * próximos 7 días). Solo mira promos de cadena completa
  * (appliesToAllBranches) porque no hay sucursal en juego todavía.
  *
- * `categoryName` null = sin categoría puntual, mirá las 3 del MVP juntas
- * (ej. "quiero ahorrar hoy", "qué me conviene hacer" — el usuario no dijo
- * ni comercio ni categoría, quiere la mejor oferta de Montevideo).
+ * `category` acepta una sola o varias: una necesidad puede resolverse en más
+ * de un tipo de comercio (el shampoo está tanto en el súper como en la
+ * farmacia) y quedarnos con una sola sería descartar promos reales por una
+ * decisión de taxonomía nuestra. null = sin categoría puntual, mirá las 3 del
+ * MVP juntas (ej. "quiero ahorrar hoy" — el usuario no dijo ni comercio ni
+ * necesidad, quiere la mejor oferta de Montevideo).
  *
  * `amount` es opcional y solo llega de un mensaje de seguimiento (ej.
  * "farmacias" y después "600 pesos") — cuando está, calculamos el ahorro
@@ -99,12 +115,19 @@ export class BrowseByCategoryUseCase {
   ) {}
 
   async execute(
-    categoryName: MvpCategoryName | null,
+    category: MvpCategoryName | readonly MvpCategoryName[] | null,
     zone: string | null,
     userId?: string,
     amount?: number,
+    request?: BrowseRequestContext,
   ): Promise<Recommendation> {
     const today = new Date();
+    const categoryNames =
+      category === null
+        ? null
+        : typeof category === 'string'
+          ? [category]
+          : [...category];
     const allowedBankNames = await getAllowedBankNames(this.prisma, userId);
 
     const promotions = await this.prisma.promotion.findMany({
@@ -112,8 +135,14 @@ export class BrowseByCategoryUseCase {
         appliesToAllBranches: true,
         validFrom: { lte: endOfDay(addDays(today, 7)) },
         validUntil: { gte: startOfDay(today) },
-        ...(categoryName
-          ? { merchantChain: { category: { name: categoryName } } }
+        // Un array VACÍO no es lo mismo que null: null es "mirá todo", []
+        // es "no hay ninguna categoría donde buscar esto" (lo que devuelve
+        // `categoriesForNeed` para una necesidad que no cubrimos). `in: []`
+        // no matchea nada, que es la respuesta correcta — si en cambio
+        // salteáramos el filtro, pedir una ferretería terminaría devolviendo
+        // promos de supermercado, justo lo que el producto no debe hacer.
+        ...(categoryNames
+          ? { merchantChain: { category: { name: { in: categoryNames } } } }
           : {}),
         // El filtro por banco NO va acá: traemos todo y filtramos en
         // memoria (son decenas de filas, no miles) para poder responder
@@ -206,7 +235,11 @@ export class BrowseByCategoryUseCase {
     const nothingFound = !comparison.today && !comparison.better;
 
     return {
-      queryLabel: categoryName ?? 'lo mejor de hoy en Montevideo',
+      queryLabel:
+        request?.label ??
+        (categoryNames?.length ? categoryNames.join(' y ') : null) ??
+        'lo mejor de hoy en Montevideo',
+      requestedItems: request?.items ?? [],
       zone,
       bestToday: comparison.today
         ? this.toOption(comparison.today, zonePoint)

@@ -183,9 +183,9 @@ export class SyncPromotionsUseCase {
    * es la foto de hoy: sobrevive a la promo y puede estar referenciada por un
    * ahorro registrado.
    *
-   * El update no toca `address` ni `neighborhood`: si esa sucursal ya vino
-   * del backfill de Places con dirección real, el feed del banco —que solo
-   * trae nombre y coordenadas— no tiene con qué mejorarla.
+   * El update solo pisa la dirección cuando el banco la publica (Santander
+   * la trae en la ficha del comercio; el feed de Itaú no): si no la trae, la
+   * que ya está —del backfill de Places— es mejor que nada.
    */
   private async saveBankBranches(
     merchantChainId: string,
@@ -199,10 +199,15 @@ export class SyncPromotionsUseCase {
         create: {
           merchantChainId,
           name: branch.name,
+          address: branch.address ?? null,
           latitude: branch.latitude,
           longitude: branch.longitude,
         },
-        update: { latitude: branch.latitude, longitude: branch.longitude },
+        update: {
+          latitude: branch.latitude,
+          longitude: branch.longitude,
+          ...(branch.address ? { address: branch.address } : {}),
+        },
       });
     }
   }

@@ -36,8 +36,13 @@ function fakeScraper(
 
 interface BranchUpsert {
   where: { merchantChainId_name: { merchantChainId: string; name: string } };
-  create: { name: string; latitude: number; longitude: number };
-  update: { latitude: number; longitude: number };
+  create: {
+    name: string;
+    address: string | null;
+    latitude: number;
+    longitude: number;
+  };
+  update: { latitude: number; longitude: number; address?: string };
 }
 
 function buildPrismaMock() {
@@ -127,14 +132,40 @@ describe('SyncPromotionsUseCase', () => {
         create: {
           merchantChainId: 'chain-farmashop',
           name: 'Farmashop Pocitos',
+          address: null,
           latitude: -34.91,
           longitude: -56.15,
         },
-        // Sin address/neighborhood: el feed no los trae, y si la sucursal ya
-        // los tiene del backfill de Places no hay con qué mejorarlos.
+        // El update no trae address: este feed no la publica, y si la
+        // sucursal ya la tiene del backfill de Places, pisarla con null sería
+        // perder el dato.
         update: { latitude: -34.91, longitude: -56.15 },
       },
     ]);
+  });
+
+  it('guarda la dirección cuando el banco sí la publica (fichas de Santander)', async () => {
+    const prisma = buildPrismaMock();
+    const useCase = new SyncPromotionsUseCase(prisma as never, [
+      fakeScraper('Santander', [
+        promo({
+          merchantChainName: 'Farmashop',
+          branches: [
+            {
+              name: 'Farmashop Centro',
+              address: '18 de Julio 1249',
+              latitude: -34.9,
+              longitude: -56.19,
+            },
+          ],
+        }),
+      ]),
+    ]);
+
+    await useCase.execute();
+
+    expect(prisma.branchUpserts[0].create.address).toBe('18 de Julio 1249');
+    expect(prisma.branchUpserts[0].update.address).toBe('18 de Julio 1249');
   });
 
   it('no guarda locales de una promo cuya cadena no matchea nada', async () => {

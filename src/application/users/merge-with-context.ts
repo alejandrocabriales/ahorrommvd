@@ -9,7 +9,8 @@ function bare(intent: ParsedIntent): PendingQuery {
   return {
     merchantName: intent.merchantName,
     branchHint: intent.branchHint,
-    categoryName: intent.categoryName,
+    need: intent.need,
+    items: intent.items,
     zone: intent.zone,
     amount: intent.amount,
     wantsGeneralSavings: intent.wantsGeneralSavings,
@@ -35,10 +36,10 @@ export function mergeWithContext(
 ): PendingQuery {
   if (!context || !isContextFresh(context, now)) return bare(intent);
 
-  // Ya trae su propio comercio/categoría/pedido general -> es un tema
+  // Ya trae su propio comercio/necesidad/pedido general -> es un tema
   // nuevo, no un seguimiento. No lo pisamos con el contexto anterior.
   const opensNewTopic =
-    intent.merchantName || intent.categoryName || intent.wantsGeneralSavings;
+    intent.merchantName || intent.need || intent.wantsGeneralSavings;
   if (opensNewTopic) return bare(intent);
 
   // Nada que ligue este mensaje al contexto (ni monto, ni zona, ni una
@@ -67,7 +68,10 @@ export function mergeWithContext(
   return {
     merchantName: query.merchantName,
     branchHint: refinesBranch ? intent.zone : query.branchHint,
-    categoryName: query.categoryName,
+    need: query.need,
+    // Los productos vienen del tema anterior: un seguimiento ("y en Pocitos?",
+    // "600 pesos") no los repite, pero se siguen buscando los mismos.
+    items: query.items,
     zone: refinesBranch ? query.zone : (intent.zone ?? query.zone),
     amount: intent.amount ?? query.amount,
     wantsGeneralSavings: query.wantsGeneralSavings,

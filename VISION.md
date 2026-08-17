@@ -695,3 +695,67 @@ horas de Montevideo. Con las piezas 1-4 arriba, la respuesta correcta
 sería preguntar el barrio si falta, y si de verdad no hay nada
 verificado ahí cerca para esas tarjetas, decirlo explícito en vez de
 sonar seguro de una opción fuera de zona.
+
+**HECHO (13/08/2026), segunda vuelta del mismo bug**: la primera pasada
+solo marcó la opción como `locationUnverified` y le pidió al Response
+Generator que avisara — en vivo eso salió como "lo único que encontré es
+25% en Soho... no tengo confirmado que haya local en Montevideo, fijate
+antes de ir", es decir, siguió siendo una recomendación. Ahora el
+fallback no existe: `BrowseByCategoryUseCase` recomienda ÚNICAMENTE
+cadenas con sucursal verificada y, si no queda ninguna, devuelve
+`nothingFound: true` + `unverifiedOnly: true`, que el handler contesta
+con un texto fijo (sin IA de por medio: con un modelo redactando, "no
+tengo nada" se degrada solo en una recomendación tibia). Dos piezas más
+en la misma vuelta: `zoneWidened` marca cuando lo verificado queda fuera
+del radio del barrio, para que la respuesta lo admita en vez de tapar la
+distancia con "aplica en cualquier local de la cadena"; y cuando sí
+conocemos el barrio, la opción viaja con la sucursal verificada MÁS
+CERCANA (`branchName`/`neighborhood`/`address`) en vez de hablar de la
+cadena en abstracto.
+
+**Estado de datos al 13/08/2026 (verificado contra la base de Railway,
+que es la que atiende WhatsApp — la local es otra base)**: para un
+usuario Itaú+OCA no hay NINGÚN restaurante verificado en Montevideo; las
+125 promos reales de Restaurantes son Santander-only. Chequeado también
+contra Places con los filtros actuales: "Soho Montevideo" devuelve 20
+resultados y ninguno sobrevive (pinturería, peluquería, ropa,
+inmobiliaria — el barrio Soho, no la cadena), y "Chajá" solo devuelve
+"El Chajá", que no matchea el nombre de la cadena. O sea: el "no tengo
+nada confirmado" no es una limitación del filtro, es la respuesta
+correcta. Pendiente aparte: la base local tiene 602 de 747 sucursales
+cargadas por la corrida vieja del backfill (sin los 4 filtros), basura
+que NO hay que sincronizar a prod.
+
+**HECHO (13/08/2026), tercera vuelta — el mismo invento por la puerta de
+al lado (`asksLocation`)**: transcript real de producción (la versión
+desplegada, sin los cambios de la segunda vuelta todavía). El bot ofreció
+Soho, el usuario preguntó "donde queda Soho?" y contestó *"No tengo la
+dirección exacta de Soho, pero la promo del 25% con Itaú aplica en
+cualquier local de la cadena. Si estás en Buceo, te conviene buscar el
+más cercano"*. Observación del usuario, exacta: cómo decís dónde está si
+no tenés la dirección. El pedido de dirección NO pasa por
+`BrowseByCategoryUseCase` — es una búsqueda por comercio puntual
+(`merchantName` + `asksLocation`), donde `unverifiedOnly` es siempre
+false por diseño ("el usuario eligió el comercio"), así que la segunda
+vuelta no lo tapaba.
+
+Arreglado distinguiendo dos huecos que antes eran el mismo `address:
+null`:
+
+- **Cadena resuelta sin `branchId`** (0 sucursales cargadas — el caso
+  Soho): `formatSearchResponse` contesta con texto fijo, sin IA, que no
+  tenemos ninguna sucursal cargada y por lo tanto no podemos confirmar
+  que tenga local en Montevideo. Mismo criterio que `unverifiedOnly`:
+  con un modelo redactando, "no sé dónde queda" se degrada en "buscá el
+  más cercano", que afirma que esos locales existen.
+- **Sucursal conocida pero sin dirección cargada** (`branchId` sí,
+  `address` null): sigue yendo al Response Generator — ahí sí sabemos
+  que el local existe — pero el `SYSTEM_PROMPT` ahora prohíbe explícito
+  "aplica en cualquier local de la cadena" y "buscá el más cercano", y
+  pide nombrar de qué local se habla. Caso nuevo en
+  `response-eval.script.ts` con esas dos frases como check negativo.
+
+El test viejo `leaves address null (honest gap...)` describía justo el
+comportamiento que resultó ser el bug (cadena sin sucursales → IA):
+reescrito con `branchId` para cubrir el segundo hueco, más un test nuevo
+para el primero.

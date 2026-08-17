@@ -4,6 +4,11 @@ import type { MessageInterpreter } from '../../domain/ai/message-interpreter.por
 import { RESPONSE_GENERATOR } from '../../domain/ai/response-generator.port';
 import type { ResponseGenerator } from '../../domain/ai/response-generator.port';
 import { PendingQuery } from '../../domain/users/pending-query';
+import {
+  categoriesForNeed,
+  isNeedCovered,
+  needLabel,
+} from '../../domain/intent/user-need';
 import { Recommendation } from '../../domain/recommendation/recommendation';
 import { SearchResponse } from '../../domain/search/search-response';
 import { isContextFresh } from '../../domain/users/conversation-context';
@@ -22,8 +27,8 @@ import { mergeWithContext } from '../users/merge-with-context';
 import { buildContextualShortReply } from '../users/build-contextual-short-reply';
 
 const CANT_UNDERSTAND_MESSAGE =
-  'No entendí bien qué buscás. Contame el nombre del comercio (ej. "Ta-Ta Pocitos") ' +
-  'o qué tipo de lugar (ej. "necesito una farmacia").';
+  'No entendí bien qué buscás. Contame qué necesitás (ej. "quiero comer algo", ' +
+  '"necesito comprar arroz y tomate") o el nombre del comercio (ej. "Ta-Ta Pocitos").';
 const NOT_FOUND_MESSAGE =
   'No encontré ese comercio. ¿Podés escribir el nombre de nuevo?';
 const ASK_BANKS_MESSAGE =
@@ -32,10 +37,19 @@ const ASK_BANKS_MESSAGE =
 const ASK_ZONE_MESSAGE =
   '¿Por qué zona de Montevideo andás? Así te tiro algo cerca tuyo, no ' +
   'una promo del otro lado de la ciudad.';
-const UNSUPPORTED_CATEGORY_MESSAGE =
-  'Por ahora solo tengo cargados descuentos de Supermercados, Farmacias y ' +
-  'Restaurantes. Para pedir otra categoría, entrá acá y escribinos a ' +
-  'soporte: https://ahorromvd-landing.netlify.app/';
+/**
+ * Entendimos QUÉ necesita, pero no tenemos comercios ni promos con que
+ * responderlo (ver `isNeedCovered`) — se lo decimos nombrando su necesidad,
+ * no una categoría interna nuestra, y sin forzarla a la categoría más
+ * parecida (pedir una ferretería no puede terminar en un supermercado).
+ */
+function uncoveredNeedMessage(label: string): string {
+  return (
+    `Para ${label} todavía no tengo nada cargado — hoy solo tengo descuentos ` +
+    'de supermercados, farmacias y restaurantes. Para pedir otra categoría, ' +
+    'entrá acá y escribinos a soporte: https://ahorromvd-landing.netlify.app/'
+  );
+}
 
 /**
  * Con sus tarjetas no hay nada, pero con otro banco sí y está igual de
@@ -71,6 +85,23 @@ function labeledBenefitsText(recommendation: Recommendation): string {
   return ` ${items.join(', y ')}.`;
 }
 
+/**
+ * Recorte explícito a la forma de PendingQuery — la consulta efectiva puede
+ * venir del ParsedIntent crudo (con banks/showAllBanks de más) y no queremos
+ * que eso termine serializado en la columna JSON.
+ */
+function toPendingQuery(query: PendingQuery): PendingQuery {
+  return {
+    merchantName: query.merchantName,
+    branchHint: query.branchHint,
+    need: query.need,
+    items: query.items,
+    zone: query.zone,
+    amount: query.amount,
+    wantsGeneralSavings: query.wantsGeneralSavings,
+  };
+}
+
 interface ReplyResult {
   message: string;
   /** null cuando no hubo una Recommendation real que valga la pena recordar (no encontrado, desambiguar, no entendí). */
@@ -78,14 +109,20 @@ interface ReplyResult {
 }
 
 /**
- * Orquesta un mensaje entrante en 3 capas: Intent Parser (IA, interpreta
- * qué preguntó), Recommendation Engine (backend puro, resuelve la
- * comparación hoy-vs-7-días y arma una Recommendation), Response Generator
- * (IA, la redacta como una recomendación — nunca decide promociones, eso ya
- * viene resuelto).
+ * Orquesta un mensaje entrante en 3 capas: Intent Parser (IA, interpreta QUÉ
+ * NECESITA — ver `UserNeed`), Recommendation Engine (backend puro: la
+ * necesidad decide en qué categorías buscar, y ahí corre la comparación
+ * hoy-vs-7-días sobre las promos ya integradas de los 3 bancos), Response
+ * Generator (IA, la redacta — nunca decide promociones, eso ya viene
+ * resuelto).
+ *
+ * El orden importa y es el punto del diseño: se empieza por la necesidad del
+ * usuario ("quiero comer", "necesito arroz y tomate") y recién después se
+ * resuelve dónde se compra eso. Las promociones son transversales: se aplican
+ * a los comercios que la necesidad eligió, no al revés.
  *
  * Memoria de corto plazo (~30 min, ver ConversationContext): si el mensaje
- * no trae comercio/categoría propios, primero probamos si es una
+ * no trae comercio/necesidad propios, primero probamos si es una
  * confirmación/espera corta ("me sirve", "mañana entonces" —
  * buildContextualShortReply) y si no, completamos los campos que falten
  * con lo último que hablamos (mergeWithContext) antes de decidir qué
@@ -152,19 +189,22 @@ export class HandleWhatsAppMessageUseCase {
     const hasKnownBanks = (user?.bankNames.length ?? 0) > 0;
     const context = user?.conversationContext ?? null;
 
-    // Pidió un tipo de comercio que no es ninguna de las 3 categorías del
-    // MVP (ej. "verdulerías") — cortamos acá, ANTES de mergear con contexto
-    // o preguntar bancos: si no, wantsGeneralSavings/browseByCategory(null)
-    // termina mezclando las 3 categorías reales como si el usuario las
-    // hubiese pedido (bug encontrado en vivo). No hay Recommendation que
-    // guardar, así que tampoco tocamos conversationContext.
-    if (intent.unsupportedCategory) {
+    // Necesidad que entendemos pero no podemos responder (ej. "una
+    // ferretería" -> shopping) — cortamos acá, ANTES de mergear con contexto
+    // o preguntar bancos: si no, browseByCategory(null) termina mezclando las
+    // 3 categorías reales como si el usuario las hubiese pedido (bug
+    // encontrado en vivo). No hay Recommendation que guardar, así que tampoco
+    // tocamos conversationContext.
+    if (intent.need && !isNeedCovered(intent.need)) {
       if (user?.pendingQuery) {
         await this.clearPendingQuery.execute(from);
       }
       await this.sender.sendTextMessage(
         from,
-        this.withConfirmations(confirmation, UNSUPPORTED_CATEGORY_MESSAGE),
+        this.withConfirmations(
+          confirmation,
+          uncoveredNeedMessage(needLabel(intent.need)),
+        ),
       );
       return;
     }
@@ -195,7 +235,7 @@ export class HandleWhatsAppMessageUseCase {
     // había.
     const isAnswerToPending =
       !intent.merchantName &&
-      !intent.categoryName &&
+      !intent.need &&
       (intent.showAllBanks ||
         (intent.banks?.length ?? 0) > 0 ||
         Boolean(intent.zone));
@@ -209,7 +249,7 @@ export class HandleWhatsAppMessageUseCase {
         ? { ...user.pendingQuery, zone: intent.zone ?? user.pendingQuery.zone }
         : mergeWithContext(intent, context, now);
 
-    // Un barrio SOLO (sin comercio/categoría propios, ej. "Pocitos" a secas)
+    // Un barrio SOLO (sin comercio/necesidad propios, ej. "Pocitos" a secas)
     // ya es un pedido en sí — mirá las 3 categorías del MVP en esa zona en
     // vez de contestar "no entendí". Tiene que salir de rawEffectiveQuery
     // (lo que el usuario/contexto realmente trajo), nunca del default de
@@ -217,7 +257,7 @@ export class HandleWhatsAppMessageUseCase {
     // una recomendación que nadie pidió.
     const hasTopic = Boolean(
       rawEffectiveQuery.merchantName ||
-      rawEffectiveQuery.categoryName ||
+      rawEffectiveQuery.need ||
       rawEffectiveQuery.wantsGeneralSavings ||
       rawEffectiveQuery.zone,
     );
@@ -244,7 +284,7 @@ export class HandleWhatsAppMessageUseCase {
     const needsCityDecline =
       Boolean(user?.knownCity) &&
       !rawEffectiveQuery.merchantName &&
-      (Boolean(rawEffectiveQuery.categoryName) ||
+      (Boolean(rawEffectiveQuery.need) ||
         rawEffectiveQuery.wantsGeneralSavings);
 
     if (needsCityDecline) {
@@ -267,17 +307,7 @@ export class HandleWhatsAppMessageUseCase {
       hasTopic && !hasKnownBanks && !intent.showAllBanks;
 
     if (needsBankQuestion) {
-      // Recortado explícito a la forma de PendingQuery — effectiveQuery
-      // puede ser el ParsedIntent crudo (con banks/showAllBanks de más) y no
-      // queremos que eso termine serializado en la columna.
-      await this.savePendingQuery.execute(from, {
-        merchantName: effectiveQuery.merchantName,
-        branchHint: effectiveQuery.branchHint,
-        categoryName: effectiveQuery.categoryName,
-        zone: effectiveQuery.zone,
-        amount: effectiveQuery.amount,
-        wantsGeneralSavings: effectiveQuery.wantsGeneralSavings,
-      });
+      await this.savePendingQuery.execute(from, toPendingQuery(effectiveQuery));
       await this.sender.sendTextMessage(
         from,
         this.withConfirmations(confirmation, ASK_BANKS_MESSAGE),
@@ -285,26 +315,19 @@ export class HandleWhatsAppMessageUseCase {
       return;
     }
 
-    // Pidió una categoría puntual ("necesito una farmacia") y no sabemos ni
-    // el barrio del mensaje ni el knownZone guardado — sin eso
+    // Pidió algo puntual ("necesito una farmacia", "arroz y tomate") y no
+    // sabemos ni el barrio del mensaje ni el knownZone guardado — sin eso
     // BrowseByCategoryUseCase no tiene con qué filtrar por distancia real.
-    // Acotado a categoryName puntual (no a wantsGeneralSavings/zone-solo):
+    // Acotado a una necesidad puntual (no a wantsGeneralSavings/zone-solo):
     // "quiero ahorrar hoy" es a propósito una consulta amplia de toda
     // Montevideo, no vale la pena la fricción de preguntar ahí.
     const needsZoneQuestion =
-      Boolean(effectiveQuery.categoryName) &&
+      Boolean(effectiveQuery.need) &&
       !effectiveQuery.merchantName &&
       !effectiveQuery.zone;
 
     if (needsZoneQuestion) {
-      await this.savePendingQuery.execute(from, {
-        merchantName: effectiveQuery.merchantName,
-        branchHint: effectiveQuery.branchHint,
-        categoryName: effectiveQuery.categoryName,
-        zone: effectiveQuery.zone,
-        amount: effectiveQuery.amount,
-        wantsGeneralSavings: effectiveQuery.wantsGeneralSavings,
-      });
+      await this.savePendingQuery.execute(from, toPendingQuery(effectiveQuery));
       await this.sender.sendTextMessage(
         from,
         this.withConfirmations(confirmation, ASK_ZONE_MESSAGE),
@@ -376,22 +399,29 @@ export class HandleWhatsAppMessageUseCase {
       );
     }
 
-    if (query.categoryName) {
+    if (query.need) {
+      // Acá está el cruce que da sentido a todo: la NECESIDAD del usuario
+      // decide en qué categorías tiene sentido buscar, y de ahí en adelante
+      // corre el mismo motor de promociones de siempre (las de los 3 bancos
+      // ya integrados). Las promos no cuelgan de la necesidad — son la capa
+      // transversal que se aplica a los comercios que la necesidad eligió.
+      const label = needLabel(query.need);
       const recommendation = await this.browseByCategory.execute(
-        query.categoryName,
+        categoriesForNeed(query.need),
         query.zone,
         filterUserId,
         query.amount ?? undefined,
+        { label, items: query.items },
       );
       return this.respondToRecommendation(
         recommendation,
-        query.categoryName,
+        label,
         Boolean(filterUserId),
       );
     }
 
     if (query.wantsGeneralSavings || query.zone) {
-      // Sin comercio ni categoría puntual ("quiero ahorrar hoy", o un
+      // Sin comercio ni necesidad puntual ("quiero ahorrar hoy", o un
       // barrio a secas como "Pocitos") -> mirá las 3 categorías del MVP
       // juntas y traé la mejor oferta de todas (con el barrio como dato
       // informativo si lo hay).
@@ -414,7 +444,8 @@ export class HandleWhatsAppMessageUseCase {
   /** Response Generator solo entra en juego cuando hay algo real que recomendar — nada que redactar si no hay data. */
   private async respondToRecommendation(
     recommendation: Recommendation,
-    categoryName: string | null,
+    /** Cómo nombrar lo que pidió, en sus términos (ej. "lugares para comer"). null = no pidió nada puntual. */
+    needLabelText: string | null,
     filteredByCards: boolean,
   ): Promise<ReplyResult> {
     // Sí hay promos vigentes, pero ninguna en un comercio que podamos
@@ -426,8 +457,8 @@ export class HandleWhatsAppMessageUseCase {
     if (recommendation.nothingFound && recommendation.unverifiedOnly) {
       // "con tus tarjetas" solo si de verdad filtramos por sus bancos —
       // con showAllBanks la búsqueda fue abierta y decirlo sería falso.
-      const what = categoryName
-        ? `ningún descuento de ${categoryName}`
+      const what = needLabelText
+        ? `ningún descuento para ${needLabelText}`
         : 'nada';
       const cards = filteredByCards ? ' con tus tarjetas' : '';
       // Si hay beneficios sin % , esos son la respuesta y van adelante:
@@ -435,7 +466,7 @@ export class HandleWhatsAppMessageUseCase {
       // lee como una contradicción.
       const opening =
         recommendation.otherBenefits.length > 0
-          ? `Para ${categoryName ?? 'hoy'}${cards} tengo${labeledBenefitsText(recommendation)} ` +
+          ? `Para ${needLabelText ?? 'hoy'}${cards} tengo${labeledBenefitsText(recommendation)} ` +
             'Descuentos en % no tengo ninguno confirmado en Montevideo hoy: ' +
             'hay promos vigentes, pero no puedo confirmar que esos comercios ' +
             'tengan local acá.'

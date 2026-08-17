@@ -26,6 +26,9 @@ export function buildRecommendationFromSearch(
 
   return {
     queryLabel: place,
+    // El usuario nombró el comercio, no productos — si nombró alguno igual
+    // no cambia nada acá: la búsqueda ya está resuelta por nombre de cadena.
+    requestedItems: [],
     zone,
     bestToday: result.today
       ? toRecommendationOption(
